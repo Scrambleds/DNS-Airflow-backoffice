@@ -4,6 +4,7 @@ from datetime import timedelta
 import pandas as pd
 from utils.data_processor import DataProcessor
 
+
 default_args = {
     'owner': 'airflow',
     'retries': 1,

@@ -1,9 +1,7 @@
-version: '3'
 services:
   postgres:
     image: postgres:13
     environment:
-      PYTHONPATH: /opt/airflow
       POSTGRES_USER: airflow
       POSTGRES_PASSWORD: airflow
       POSTGRES_DB: airflow
@@ -12,11 +10,13 @@ services:
     restart: always
 
   airflow-webserver:
-    image: apache/airflow:2.8.1
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: custom-airflow:2.9.0
     environment:
-      PYTHONPATH: /opt/airflow
       AIRFLOW__CORE__EXECUTOR: LocalExecutor
-      AIRFLOW__CORE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
       AIRFLOW__WEBSERVER__EXPOSE_CONFIG: 'True'
     volumes:
       - ./dags:/opt/airflow/dags
@@ -30,12 +30,13 @@ services:
       - postgres
     restart: always
     command: >
-      bash -c "airflow db init &&
+      bash -c "airflow db migrate &&
                airflow users create --username admin --firstname airflow --lastname airflow --role Admin --email admin@example.com --password admin &&
                airflow webserver"
 
   airflow-scheduler:
     build: .
+    image: custom-airflow:2.9.0
     restart: always
     depends_on:
       - airflow-webserver
@@ -45,7 +46,8 @@ services:
       - ./plugins:/opt/airflow/plugins
       - ./utils:/opt/airflow/utils
       - ./config:/opt/airflow/config
-    command: airflow scheduler
+    command: >
+      bash -c "airflow db migrate && airflow scheduler"
 
 volumes:
   postgres-db-volume:

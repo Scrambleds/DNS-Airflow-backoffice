@@ -1,4 +1,9 @@
-FROM apache/airflow:2.8.1
+FROM apache/airflow:2.9.0
+
+USER airflow
+RUN pip install oracledb
+
+ENV PYTHONPATH="/opt/airflow"
 
 # คัดลอก requirements.txt เข้าไปใน image
 COPY requirements.txt /requirements.txt
