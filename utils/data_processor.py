@@ -25,6 +25,7 @@ class DataProcessor:
             SELECT * FROM TQMSALE.PROSPECT
             """
             df = pd.read_sql(sql, conn)
+            df
         return df
 
     def filter_today_block(self, df):
