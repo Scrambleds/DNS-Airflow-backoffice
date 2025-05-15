@@ -14,7 +14,7 @@ default_args = {
 @dag(
     dag_id='oracle_data_processing_dag_cfg',
     default_args=default_args,
-    schedule_interval='1 * * * *',
+    schedule_interval='* 20 * * *',
     start_date=days_ago(1),
     catchup=False,
     # tags=['oracle', 'config', 'taskflow'],
