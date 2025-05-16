@@ -22,54 +22,82 @@ class DataProcessor:
     def query_data(self):
         with oracledb.connect(**self.conn_info) as conn:
             sql = """
-             SELECT 
-                    q.*, 
-                    l.leadname, 
-                    l.leadsurname,
-                    a.assignstatus,
-                    
-                    -- ทะเบียนรถ
-                    (SELECT plateid 
-                    FROM tqmsale.leadcar c 
-                    WHERE c.leadid = a.leadid 
-                    AND c.leadcarid = a.leadcarid
-                    FETCH FIRST 1 ROWS ONLY) AS PLATEID,
-                    
-                    -- ข้อมูล Staff
-                    (SELECT d.departmentcode || ':' || f.staffcode || ':' || f.staffname  
-                    FROM tqmsale.V_STAFF f 
-                    JOIN tqmsale.department d ON f.departmentid = d.departmentid 
-                    WHERE f.staffid = a.staffid
-                    FETCH FIRST 1 ROWS ONLY) AS STAFF,
-                    
-                    -- QC ชื่อ
-                    (SELECT bytedes 
-                    FROM tqmsale.sysbytedes 
-                    WHERE tablename = 'LEADQC' 
-                    AND columnname = 'QCCODE' 
-                    AND bytecode = q.qccode
-                    FETCH FIRST 1 ROWS ONLY) AS QCNAME,
+                    SELECT 
+                        q.*, 
+                        l.leadname, 
+                        l.leadsurname,
+                        a.assignstatus,
+                        
+                        -- ทะเบียนรถ
+                        (SELECT plateid 
+                        FROM tqmsale.leadcar c 
+                        WHERE c.leadid = a.leadid 
+                        AND c.leadcarid = a.leadcarid
+                        FETCH FIRST 1 ROWS ONLY) AS PLATEID,
+                        
+                        -- ข้อมูล Staff
+                        (SELECT d.departmentcode || ':' || f.staffcode || ':' || f.staffname  
+                        FROM tqmsale.V_STAFF f 
+                        JOIN tqmsale.department d ON f.departmentid = d.departmentid 
+                        WHERE f.staffid = a.staffid
+                        FETCH FIRST 1 ROWS ONLY) AS STAFF,
+                        
+                        -- QC ชื่อ
+                        (SELECT bytedes 
+                        FROM tqmsale.sysbytedes 
+                        WHERE tablename = 'LEADQC' 
+                        AND columnname = 'QCCODE' 
+                        AND bytecode = q.qccode
+                        FETCH FIRST 1 ROWS ONLY) AS QCNAME,
 
-                    -- แจ้งห้ามโทร
-                    (SELECT MAX('<br><font color=red><b>แจ้งห้ามโทร::' || TO_CHAR(requestdatetime,'YY/MM/DD') || '</b><br><font color=#992211>' || remark)
-                    FROM tqmsale.leadbypassrequest tx 
-                    WHERE tx.leadid = a.leadid 
-                    AND tx.leadassignid = a.leadassignid) AS BYPASSREQUEST,
-                    
-                    -- ผลลัพธ์การติดต่อล่าสุด
-                    (SELECT resultcode || ':' || resultname 
-                    FROM tqmsale.result 
-                    WHERE resultid = a.resultid
-                    FETCH FIRST 1 ROWS ONLY) AS RESULT
-                FROM 
-                    tqmsale.leadqc q
-                    LEFT JOIN tqmsale.leadassign a ON q.leadid = a.leadid AND q.leadassignid = a.leadassignid
-                    JOIN tqmsale.VIEW_LEAD_LO l ON q.leadid = l.leadid
-                WHERE 1=1
-                --AND q.actionstaffid = :staffid
-                    -- เงื่อนไขเพิ่มเติมตามสถานะ
-                AND q.QCCODE = 10
-                AND q.qcstatus = 'W'
+                        -- แจ้งห้ามโทร
+                        (SELECT MAX('<br><font color=red><b>แจ้งห้ามโทร::' || TO_CHAR(requestdatetime,'YY/MM/DD') || '</b><br><font color=#992211>' || remark)
+                        FROM tqmsale.leadbypassrequest tx 
+                        WHERE tx.leadid = a.leadid 
+                        AND tx.leadassignid = a.leadassignid) AS BYPASSREQUEST,
+                        
+                        -- ตรวจสอบสถานะ H (แสดง 'Y' ถ้ามีสถานะ H, 'N' ถ้าไม่มี)
+                        CASE 
+                            WHEN EXISTS (
+                                SELECT 1 
+                                FROM tqmsale.leadbypassrequest tx 
+                                WHERE tx.leadid = a.leadid 
+                                AND tx.leadassignid = a.leadassignid
+                                AND tx.bypassstatus = 'H'
+                            ) THEN 'Y'
+                            ELSE 'N'
+                        END AS has_bypass_h,
+
+                        -- แสดงข้อมูล bypassstatus = 'H' (ถ้ามี)
+                        (SELECT MAX(tx.bypassstatus || ':' || TO_CHAR(tx.requestdatetime, 'DD/MM/YYYY') || ':' || tx.remark)
+                        FROM tqmsale.leadbypassrequest tx 
+                        WHERE tx.leadid = a.leadid 
+                        AND tx.leadassignid = a.leadassignid
+                        AND tx.bypassstatus = 'H') AS bypass_h_details,
+                        
+                        -- ผลลัพธ์การติดต่อล่าสุด
+                        (SELECT resultcode || ':' || resultname 
+                        FROM tqmsale.result 
+                        WHERE resultid = a.resultid
+                        FETCH FIRST 1 ROWS ONLY) AS RESULT
+                        FROM 
+                            tqmsale.leadqc q
+                            LEFT JOIN tqmsale.leadassign a ON q.leadid = a.leadid AND q.leadassignid = a.leadassignid
+                            JOIN tqmsale.VIEW_LEAD_LO l ON q.leadid = l.leadid
+                        WHERE 1=1
+                        --	AND a.ASSIGNSTATUS NOT IN ('F')
+                        --AND q.actionstaffid = :staffid
+                        -- เงื่อนไขเพิ่มเติมตามสถานะ
+                        --AND q.QCCODE = '10'
+                        AND q.qcstatus = 'S'
+                        AND EXISTS (
+                                SELECT 1 
+                                FROM tqmsale.leadbypassrequest tx 
+                                WHERE tx.leadid = a.leadid 
+                                AND tx.leadassignid = a.leadassignid
+                                AND tx.bypassstatus = 'H'
+                        --          AND tx.requestdatetime = SYSDATE
+                            )
             """
             df = pd.read_sql(sql, conn)
             
