@@ -106,11 +106,6 @@ class DataProcessor:
             
         return df
 
-    def filter_today_block(self, df):
-        today = datetime.now().date()
-        filtered_df = df[df['block_date'] == str(today)]
-        return filtered_df
-
     def update_status(self, df):
         if df.empty:
             print("No data to update.")

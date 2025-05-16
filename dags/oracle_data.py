@@ -27,15 +27,10 @@ def dag_main():
         return processor.query_data()
 
     @task()
-    def filter_today(df: pd.DataFrame):
-        return processor.filter_today_block(df)
-
-    @task()
     def update(df: pd.DataFrame):
         return processor.update_status(df)
 
     df1 = query_data()
-    df2 = filter_today(df1)
-    update(df2)
+    update(df1)
 
 dag_instance = dag_main()
