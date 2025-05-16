@@ -4,11 +4,11 @@ from datetime import timedelta
 import pandas as pd
 from utils.data_processor import DataProcessor
 
-
 default_args = {
     'owner': 'airflow',
-    'retries': 1,
+    'retries': 20,
     'retry_delay': timedelta(minutes=5),
+    "depends_on_past": False
 }
 
 @dag(
