@@ -9,3 +9,5 @@ openpyxl>=3.1.5
 pythainlp>=5.0.4
 pendulum>=3.0.0
 DateTime>=5.5
+line-bot-sdk>=1.20.0
+flask>=2.0.0 

@@ -16,8 +16,33 @@ from openpyxl import Workbook
 from openpyxl.styles import Font, Alignment, Color, PatternFill, Border, Side
 from openpyxl.utils import get_column_letter
 from openpyxl.utils.dataframe import dataframe_to_rows
+from linebot import LineBotApi
+from linebot.exceptions import LineBotApiError
+from linebot.models import TextSendMessage
 import pendulum
 import logging
+import requests
+
+# อ่าน config
+config_file_path = 'config/db_config.cfg'
+config = configparser.ConfigParser()
+config.read(config_file_path)
+local = config.get("variable", "tz")
+local_tz = pendulum.timezone(local)
+currentDateAndTime = datetime.now(tz=local_tz)
+currentDate = currentDateAndTime.strftime("%Y-%m-%d")
+currentDateFormat = currentDateAndTime.strftime("%d-%m-%y")
+currentthaiDate = thai_strftime(currentDateAndTime, "%Aที่ %-d %B พ.ศ.%Y")
+
+#เก็บค่า line token ไว้ใน config
+# line_notify_token = config.get('variable', 'line_token')
+# line_notify_api = "https://notify-api.line.me/api/notify"
+line_user_id = config.get('variable', 'line_user_id')
+line_channel_secret = config.get('variable', 'channel_secret')
+line_access_token = config.get('variable', 'channel_access_token')
+
+# ตั้งค่า Line Bot API (ควรทำครั้งเดียวตอนเริ่มต้น)
+line_bot_api = LineBotApi(config.get('variable', 'channel_access_token'))
 
 # ตกแต่ง Excel
 red_font = Font(color="FF0000")
@@ -29,6 +54,30 @@ thin_border = Border(
     bottom=Side(style='thin')
 )
 
+def send_line_notification(message, user_id=line_user_id):
+    """
+    ส่งข้อความผ่าน Line Messaging API
+    :param message: ข้อความที่จะส่ง
+    :param user_id: Line User ID ของผู้รับ (ถ้าไม่ระบุจะใช้ค่า default)
+    """
+    try:
+        # สร้าง LineBotApi instance ด้วย access token
+        line_bot_api = LineBotApi(line_access_token)
+        
+        # ส่งข้อความ
+        line_bot_api.push_message(
+            user_id,
+            TextSendMessage(text=message)
+        )
+        logging.info("Line notification sent successfully")
+        return True
+    except LineBotApiError as e:
+        logging.error(f"Line API error: {e}")
+        return False
+    except Exception as e:
+        logging.error(f"Error sending Line notification: {e}")
+        return False
+
 def format_worksheet(ws):
     
     # จัดรูปแบบหัวข้อรายงาน (แถวที่ 1)
@@ -38,7 +87,8 @@ def format_worksheet(ws):
     # title_cell.font = Font(bold=True, size=14)
     # title_cell.alignment = Alignment(horizontal='center', vertical='center')
     # title_cell.border = thin_border
-      
+    
+    #แถวแรก Header
     for col in ws.iter_cols(min_row=1, max_row=1):
         for cell in col:
             cell.fill = yellow_fill
@@ -72,25 +122,12 @@ def format_worksheet(ws):
         adjusted_width = (max_length + 2) * 1.2
         ws.column_dimensions[column].width = adjusted_width
 
-# อ่าน config
-config_file_path = 'config/db_config.cfg'
-config = configparser.ConfigParser()
-config.read(config_file_path)
-local = config.get("variable", "tz")
-local_tz = pendulum.timezone(local)
-currentDateAndTime = datetime.now(tz=local_tz)
-currentDate = currentDateAndTime.strftime("%Y-%m-%d")
-currentDateFormat = currentDateAndTime.strftime("%d-%m-%y")
-currentthaiDate = thai_strftime(currentDateAndTime, "%Aที่ %-d %B พ.ศ.%Y")
-
 default_args = {
     'owner': 'airflow',
     'depends_on_past': False,
     'start_date': datetime(2023, 1, 1, tzinfo=local_tz),
-    'retries': 3,
+    'retries': 20,
     'retry_delay': timedelta(minutes=5),
-    'email_on_failure': False,
-    'email_on_retry': False,
 }
 
 @dag(
@@ -98,12 +135,11 @@ default_args = {
     start_date=datetime(2023, 1, 1, tzinfo=local_tz),
     catchup=False,
     default_args=default_args,
-    tags=['report'],
-    max_active_runs=1,
+    tags=['Test'],
 )
 def opportunity_report_dag():
     
-    @task(retries=20, retry_delay=timedelta(minutes=2))
+    @task
     def query_data() -> pd.DataFrame:
         """ดึงข้อมูลจาก Oracle Database"""
         try:
@@ -115,6 +151,9 @@ def opportunity_report_dag():
             db_name = config.get(env, 'dbname')
 
             logging.info(f"Connecting to Oracle DB: {db_host}:{db_port}/{db_name}")
+            message = f"เริ่มต้นทำงาน Auto"
+            send_line_notification(message)
+            print(message)
             
             dsn_name = oracledb.makedsn(db_host, db_port, service_name=db_name)
             with oracledb.connect(
@@ -140,7 +179,7 @@ def opportunity_report_dag():
             logging.error(f"Error querying data: {str(e)}")
             raise
         
-    @task(retries=20, retry_delay=timedelta(minutes=2))
+    @task
     def query_data_sheet2() -> pd.DataFrame:
         """ดึงข้อมูลจาก Oracle Database"""
         try:
@@ -168,7 +207,13 @@ def opportunity_report_dag():
                 
                 columns = [desc[0] for desc in cursor.description]
                 data = cursor.fetchall()
+                
                 df = pd.DataFrame(data, columns=columns)
+                
+                Count_data = len(df)
+                
+                message = f"จำนวนข้อมูลที่ได้ {Count_data}"
+                send_line_notification(message)
                 
                 logging.info(f"Retrieved {len(df)} records successfully")
                 return df
@@ -216,11 +261,7 @@ def opportunity_report_dag():
             logging.error(f"Error generating report: {str(e)}")
             raise
 
-    @task(
-        retries=3,
-        retry_delay=timedelta(minutes=2),
-        execution_timeout=timedelta(minutes=10)
-    )
+    @task
     def send_email(excel_report: str) -> bool:
         """ส่งอีเมลพร้อมไฟล์แนบ"""
         try:
@@ -273,6 +314,8 @@ def opportunity_report_dag():
                     server.login(smtp_mail, smtp_password)
                     server.send_message(msg)
             
+            message = f"ส่งอีเมลสำเร็จ ณ วันที่ {currentDateFormat}"
+            send_line_notification(message)
             logging.info(f"Email sent successfully to {receiver_emails} (CC: {cc_emails})")
             return True
             
