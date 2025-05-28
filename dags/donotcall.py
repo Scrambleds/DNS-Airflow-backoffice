@@ -137,110 +137,36 @@ def send_flex_notification(qccode_results, user_id=line_user_id):
 
         # เพิ่มข้อมูลแต่ละ QCCODE
         body_contents = contents["body"]["contents"]
+        
+        def add_summary_row(title, count):
+            body_contents.append({
+                "type": "box",
+                "layout": "horizontal",
+                "contents": [
+                    {
+                        "type": "text",
+                        "text": f"{title}:",
+                        "size": "md",
+                        "color": "#333333",
+                        "align": "start",
+                        "flex": 2
+                    },
+                    {
+                        "type": "text",
+                        "text": f"{count} รายการ",
+                        "size": "md",
+                        "color": "#333333",
+                        "align": "end",
+                        "flex": 1
+                    }
+                ],
+                "margin": "md"
+            })
 
-        # Do not call list (10)
-        count = len(qccode_results.get("df_DNC", pd.DataFrame()))
-        body_contents.append({
-            "type": "box",
-            "layout": "horizontal",
-            "contents": [
-                {
-                    "type": "text",
-                    "text": "Do not call list (10):",
-                    "size": "md",
-                    "color": "#333333",
-                    "align": "start",
-                    "flex": 2
-                },
-                {
-                    "type": "text",
-                    "text": f"{count} รายการ",
-                    "size": "md",
-                    "color": "#333333",
-                    "align": "end",
-                    "flex": 1
-                }
-            ],
-            "margin": "md"
-        })
-
-        # V2T (11)
-        count = len(qccode_results.get("df_V2T", pd.DataFrame()))
-        body_contents.append({
-            "type": "box",
-            "layout": "horizontal",
-            "contents": [
-                {
-                    "type": "text",
-                    "text": "V2T (11):",
-                    "size": "md",
-                    "color": "#333333",
-                    "align": "start",
-                    "flex": 2
-                },
-                {
-                    "type": "text",
-                    "text": f"{count} รายการ",
-                    "size": "md",
-                    "color": "#333333",
-                    "align": "end",
-                    "flex": 1
-                }
-            ],
-            "margin": "md"
-        })
-
-        # AI-Do not call (12)
-        count = len(qccode_results.get("df_AI", pd.DataFrame()))
-        body_contents.append({
-            "type": "box",
-            "layout": "horizontal",
-            "contents": [
-                {
-                    "type": "text",
-                    "text": "AI-Do not call (12):",
-                    "size": "md",
-                    "color": "#333333",
-                    "align": "start",
-                    "flex": 2
-                },
-                {
-                    "type": "text",
-                    "text": f"{count} รายการ",
-                    "size": "md",
-                    "color": "#333333",
-                    "align": "end",
-                    "flex": 1
-                }
-            ],
-            "margin": "md"
-        })
-
-        # Mismatch number (21)
-        count = len(qccode_results.get("df_MISMATCH_NUM", pd.DataFrame()))
-        body_contents.append({  
-            "type": "box",
-            "layout": "horizontal",
-            "contents": [
-                {
-                    "type": "text",
-                    "text": "Mismatch number (21):",
-                    "size": "md",
-                    "color": "#333333",
-                    "align": "start",
-                    "flex": 2
-                },
-                {
-                    "type": "text",
-                    "text": f"{count} รายการ",
-                    "size": "md",
-                    "color": "#333333",
-                    "align": "end",
-                    "flex": 1
-                }
-            ],
-            "margin": "md"
-        })
+        add_summary_row("Do not call list (10)", len(qccode_results.get("df_DNC", pd.DataFrame())))
+        add_summary_row("V2T (11)", len(qccode_results.get("df_V2T", pd.DataFrame())))
+        add_summary_row("AI-Do not call (12)", len(qccode_results.get("df_AI", pd.DataFrame())))
+        add_summary_row("Mismatch number (21)", len(qccode_results.get("df_MISMATCH_NUM", pd.DataFrame())))
 
         # เพิ่มส่วนท้าย
         body_contents.extend([
