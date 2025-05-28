@@ -3,7 +3,7 @@ import configparser
 # from airflow.decorators import dag, task, task_group  # เพิ่ม import นี้
 # from airflow.operators.python import PythonOperator, BranchPythonOperator
 from airflow import DAG
-from airflow.decorators import task, dag
+from airflow.decorators import task, dag, task_group
 from airflow.operators.empty import EmptyOperator
 from airflow.operators.empty import EmptyOperator
 from airflow.operators.bash import BashOperator
@@ -125,7 +125,7 @@ def send_flex_notification(qccode_results, user_id=line_user_id):
                     },
                     {
                         "type": "text",
-                        "text": "สรุปผลการปรับสถานะ:",
+                        "text": "สรุปผลการปรับสถานะ",
                         "margin": "lg",
                         "size": "md",
                         "weight": "bold",
@@ -141,41 +141,105 @@ def send_flex_notification(qccode_results, user_id=line_user_id):
         # Do not call list (10)
         count = len(qccode_results.get("df_DNC", pd.DataFrame()))
         body_contents.append({
-            "type": "text",
-            "text": f"Do not call list (10): {count} รายการ",
-            "margin": "md",
-            "size": "md",
-            "color": "#333333"
+            "type": "box",
+            "layout": "horizontal",
+            "contents": [
+                {
+                    "type": "text",
+                    "text": "Do not call list (10):",
+                    "size": "md",
+                    "color": "#333333",
+                    "align": "start",
+                    "flex": 2
+                },
+                {
+                    "type": "text",
+                    "text": f"{count} รายการ",
+                    "size": "md",
+                    "color": "#333333",
+                    "align": "end",
+                    "flex": 1
+                }
+            ],
+            "margin": "md"
         })
 
         # V2T (11)
         count = len(qccode_results.get("df_V2T", pd.DataFrame()))
         body_contents.append({
-            "type": "text",
-            "text": f"V2T (11): {count} รายการ",
-            "margin": "md",
-            "size": "md",
-            "color": "#333333"
+            "type": "box",
+            "layout": "horizontal",
+            "contents": [
+                {
+                    "type": "text",
+                    "text": "V2T (11):",
+                    "size": "md",
+                    "color": "#333333",
+                    "align": "start",
+                    "flex": 2
+                },
+                {
+                    "type": "text",
+                    "text": f"{count} รายการ",
+                    "size": "md",
+                    "color": "#333333",
+                    "align": "end",
+                    "flex": 1
+                }
+            ],
+            "margin": "md"
         })
 
         # AI-Do not call (12)
         count = len(qccode_results.get("df_AI", pd.DataFrame()))
         body_contents.append({
-            "type": "text",
-            "text": f"AI-Do not call (12): {count} รายการ",
-            "margin": "md",
-            "size": "md",
-            "color": "#333333"
+            "type": "box",
+            "layout": "horizontal",
+            "contents": [
+                {
+                    "type": "text",
+                    "text": "AI-Do not call (12):",
+                    "size": "md",
+                    "color": "#333333",
+                    "align": "start",
+                    "flex": 2
+                },
+                {
+                    "type": "text",
+                    "text": f"{count} รายการ",
+                    "size": "md",
+                    "color": "#333333",
+                    "align": "end",
+                    "flex": 1
+                }
+            ],
+            "margin": "md"
         })
 
         # Mismatch number (21)
         count = len(qccode_results.get("df_MISMATCH_NUM", pd.DataFrame()))
-        body_contents.append({
-            "type": "text",
-            "text": f"Mismatch number (21): {count} รายการ",
-            "margin": "md",
-            "size": "md",
-            "color": "#333333"
+        body_contents.append({  
+            "type": "box",
+            "layout": "horizontal",
+            "contents": [
+                {
+                    "type": "text",
+                    "text": "Mismatch number (21):",
+                    "size": "md",
+                    "color": "#333333",
+                    "align": "start",
+                    "flex": 2
+                },
+                {
+                    "type": "text",
+                    "text": f"{count} รายการ",
+                    "size": "md",
+                    "color": "#333333",
+                    "align": "end",
+                    "flex": 1
+                }
+            ],
+            "margin": "md"
         })
 
         # เพิ่มส่วนท้าย
@@ -364,7 +428,7 @@ with DAG(
         print(f"{message}")
         # send_line_notification(message)
         
-        result = ti.xcom_pull(task_ids="Get_dnc_work", key="return_value")
+        result = ti.xcom_pull(task_ids="Process_x.Get_dnc_work", key="return_value")
         
         # แสดงผลลัพธ์ที่ดึงมาจาก XCom
         print("XCom result from Get_dnc_work:", result)
@@ -435,7 +499,7 @@ with DAG(
         message = f"Processing task {task_id} ,try_number {try_number}"
         print(f"{message}")
         
-        result = ti.xcom_pull(task_ids="update_leadbypassrequest_status", key="return_value")
+        result = ti.xcom_pull(task_ids="Process_x.update_leadbypassrequest_status", key="return_value")
         df = result.get("Update_x_sum", pd.DataFrame())
         
         try:
@@ -473,7 +537,7 @@ with DAG(
         print(f"{message}")
         
         # ดึงผลลัพธ์จาก task ก่อนหน้า
-        qccode_results = ti.xcom_pull(task_ids="Split_qccode_dnc", key="return_value")
+        qccode_results = ti.xcom_pull(task_ids="Process_x.Split_qccode_dnc", key="return_value")
         
         # ส่งการแจ้งเตือนแบบ Flex Message
         send_flex_notification(qccode_results)
@@ -482,11 +546,18 @@ with DAG(
 
     start = EmptyOperator(task_id="start", trigger_rule="none_failed_min_one_success")
     end = EmptyOperator(task_id="end", trigger_rule="none_failed_min_one_success")
-    Get_dnc_task = Get_dnc_work()
-    Update_x_task = update_leadbypassrequest_status()
-    Split_qccode_task = Split_qccode_dnc()
-    Notify_final_task = notify_final_result() 
+    
+    @task_group
+    def Process_x():
+        Get_dnc_task = Get_dnc_work()
+        Update_x_task = update_leadbypassrequest_status()
+        Split_qccode_task = Split_qccode_dnc()
+        Notify_final_task = notify_final_result() 
         
+        Get_dnc_task >> Update_x_task >> Split_qccode_task >> Notify_final_task
+        
+    Process_x_group = Process_x()
+    
     (        
-    start >> Get_dnc_task >> Update_x_task >> Split_qccode_task >> Notify_final_task >> end
+    start >> Process_x_group >> end
     )
