@@ -313,7 +313,7 @@ with DAG(
     dag_id="DNC",
     default_args=default_args,
     catchup=False,
-    description="DNC",
+    description="DNC airflow",
     # tags=["Dev"],
     start_date=datetime(2024, 4, 24, 16, 30, 0, 0, tzinfo=local_tz),
     schedule_interval="* 18 * * 1-7",
