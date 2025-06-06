@@ -47,7 +47,7 @@ line_user_id_user = config.get('variable', 'line_user_id_user')
 line_access_token_user = config.get('variable', 'channel_access_token_user')
 
 line_user_id = config.get('variable', 'line_user_id')
-line_channel_secret = config.get('variable', 'channel_secret')
+# line_channel_secret = config.get('variable', 'channel_secret')
 line_access_token = config.get('variable', 'channel_access_token')
 
 # ตั้งค่า Line Bot API (ควรทำครั้งเดียวตอนเริ่มต้น)
@@ -348,7 +348,7 @@ def send_flex_notification_end(qccode_results, user_id=line_user_id_user):
 def ConOracle():
     try:
         
-        env = os.getenv('ENV', 'preprod')
+        env = os.getenv('ENV', 'pro')
         db_host = config.get(env, 'host')
         db_port = config.get(env, 'port')
         db_username = config.get(env, 'username')
