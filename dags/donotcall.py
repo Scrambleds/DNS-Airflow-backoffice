@@ -43,12 +43,16 @@ currentDateAndTime = datetime.now(tz=local_tz)
 currentDate = currentDateAndTime.strftime("%Y-%m-%d")
 currentTime = currentDateAndTime.strftime("%H:%M:%S")
 
+line_user_id_user = config.get('variable', 'line_user_id_user')
+channel_access_token_user = config.get('variable', 'channel_access_token_user')
+
 line_user_id = config.get('variable', 'line_user_id')
-line_channel_secret = config.get('variable', 'channel_secret')
+# line_channel_secret = config.get('variable', 'channel_secret')
 line_access_token = config.get('variable', 'channel_access_token')
 
 # ตั้งค่า Line Bot API (ควรทำครั้งเดียวตอนเริ่มต้น)
 line_bot_api = LineBotApi(config.get('variable', 'channel_access_token'))
+dnc_dates = config.get('variable', 'dnc_dates')
 
 def send_line_notification(message, user_id=line_user_id):
     """
@@ -73,8 +77,93 @@ def send_line_notification(message, user_id=line_user_id):
     except Exception as e:
         logging.error(f"Error sending Line notification: {e}")
         return False
+    
+def send_flex_notification_start(message=None):
+    """
+    ส่ง Flex Message เริ่มต้นทำงาน
+    :param message: ข้อความเพิ่มเติมในกรณี error (optional)
+    """
+    try:
+        contents = {
+            "type": "bubble",
+            "body": {
+                "type": "box",
+                "layout": "vertical",
+                "contents": [
+                    {
+                        "type": "text",
+                        "text": "AUTOMATION",
+                        "color": "#00d610",
+                        "size": "sm",
+                        "weight": "bold",
+                        "margin": "xs"
+                    },
+                    {
+                        "type": "text",
+                        "text": "ระบบเรียกงาน DNC",
+                        "size": "lg",
+                        "margin": "xl",
+                        "color": "#727272",
+                        "weight": "bold"
+                    },
+                    {
+                        "type": "text",
+                        "text": "[ระบบเริ่มทำงาน]" if not message else "[เกิดข้อผิดพลาด]",
+                        "margin": "none",
+                        "size": "lg",
+                        "weight": "bold",
+                        "color": "#727272"
+                    },
+                    {
+                        "type": "text",
+                        "text": f"วันที่ {currentDate} เวลา {currentTime} น.",
+                        "margin": "lg",
+                        "size": "xs",
+                        "color": "#a6a6a6"
+                    },
+                    {
+                        "type": "separator",
+                        "margin": "lg"
+                    }
+                ]
+            }
+        }
+        
+        if message:
+            contents["body"]["contents"].append({
+                "type": "text",
+                "text": "รายละเอียดข้อผิดพลาด:",
+                "margin": "lg",
+                "size": "md",
+                "weight": "bold",
+                "color": "#000000"
+            })
+            contents["body"]["contents"].append({
+                "type": "text",
+                "text": message,
+                "margin": "md",
+                "size": "sm",
+                "color": "#000000",
+                "wrap": True
+            })
+        
+        # สร้าง Flex Message
+        flex_message = FlexSendMessage(
+            alt_text="สถานะการทำงาน DNC",
+            contents=contents
+        )
 
-def send_flex_notification(qccode_results, user_id=line_user_id):
+        # ส่งข้อความ
+        line_bot_api.push_message(line_user_id, flex_message)
+        
+        logging.info("Flex notification sent successfully")
+        return True
+        
+    except Exception as e:
+        logging.error(f"Error sending Flex notification: {e}")
+        return False
+    
+def send_flex_notification_end(qccode_results, user_id=line_user_id):
     """
     ส่ง Flex Message สรุปผลผ่าน Line Messaging API
     :param qccode_results: ผลลัพธ์จาก Split_qccode_dnc
@@ -125,7 +214,7 @@ def send_flex_notification(qccode_results, user_id=line_user_id):
                     },
                     {
                         "type": "text",
-                        "text": "สรุปผลการปรับสถานะ",
+                        "text": "รายการครบกำหนดสิ้นสุดระยะติดต่อ",
                         "margin": "lg",
                         "size": "md",
                         "weight": "bold",
@@ -138,6 +227,55 @@ def send_flex_notification(qccode_results, user_id=line_user_id):
         # เพิ่มข้อมูลแต่ละ QCCODE
         body_contents = contents["body"]["contents"]
         
+        # คำนวณจำนวนงานทั้งหมด
+        total_count = (
+            len(qccode_results.get("df_DNC", pd.DataFrame())) +
+            len(qccode_results.get("df_V2T", pd.DataFrame())) +
+            len(qccode_results.get("df_AI", pd.DataFrame())) +
+            len(qccode_results.get("df_MISMATCH_NUM", pd.DataFrame()))
+        )
+
+        # เพิ่มสรุปจำนวนงานทั้งหมด
+        body_contents.append({
+            "type": "box",
+            "layout": "horizontal",
+            "contents": [
+                {
+                    "type": "text",
+                    "text": "รวมทั้งสิ้น",
+                    "size": "md",
+                    "color": "#333333",
+                    "align": "start",
+                    "flex": 2
+                },
+                {
+                    "type": "text",
+                    "text": f"{total_count} รายการ",
+                    "size": "md",
+                    "color": "#333333",
+                    "align": "end",
+                    "flex": 1
+                }
+            ],
+            "margin": "md"
+        })
+
+        # เพิ่มเส้นคั่น
+        body_contents.append({
+            "type": "separator",
+            "margin": "lg"
+        })
+
+        # เพิ่มหัวข้อสรุปผลการปรับสถานะ
+        body_contents.append({
+            "type": "text",
+            "text": "สรุปผลการปรับสถานะ",
+            "margin": "lg",
+            "size": "md",
+            "weight": "bold",
+            "color": "#000000"
+        })
+
         def add_summary_row(title, count):
             body_contents.append({
                 "type": "box",
@@ -145,7 +283,7 @@ def send_flex_notification(qccode_results, user_id=line_user_id):
                 "contents": [
                     {
                         "type": "text",
-                        "text": f"{title}:",
+                        "text": f"{title}",
                         "size": "md",
                         "color": "#333333",
                         "align": "start",
@@ -166,7 +304,7 @@ def send_flex_notification(qccode_results, user_id=line_user_id):
         add_summary_row("Do not call list (10)", len(qccode_results.get("df_DNC", pd.DataFrame())))
         add_summary_row("V2T (11)", len(qccode_results.get("df_V2T", pd.DataFrame())))
         add_summary_row("AI-Do not call (12)", len(qccode_results.get("df_AI", pd.DataFrame())))
-        add_summary_row("Mismatch number (21)", len(qccode_results.get("df_MISMATCH_NUM", pd.DataFrame())))
+        add_summary_row("เบอร์ผิด (21)", len(qccode_results.get("df_MISMATCH_NUM", pd.DataFrame())))
 
         # เพิ่มส่วนท้าย
         body_contents.extend([
@@ -207,7 +345,10 @@ def send_flex_notification(qccode_results, user_id=line_user_id):
 # Connect DB
 def ConOracle():
     try:
-        env = os.getenv('ENV', 'dev')
+        
+        send_flex_notification_start()
+        
+        env = os.getenv('ENV', 'pre')
         db_host = config.get(env, 'host')
         db_port = config.get(env, 'port')
         db_username = config.get(env, 'username')
@@ -221,16 +362,16 @@ def ConOracle():
         print(f"Connecting database {db_name}")
         return cursor, conn
     except oracledb.Error as error:
-        error_log = "เกิดข้อผิดพลาดในการเชื่อมต่อกับ Oracle DB:", error
-        # send_line_notification(error_log)
+        message = f"เกิดข้อผิดพลาดในการเชื่อมต่อกับ Oracle DB : {error}"
+        send_flex_notification_start(message)
         print("เกิดข้อผิดพลาดในการเชื่อมต่อกับ Oracle DB:", error)
-        return error_log, None
+        return message, None
         
-    # Default arguments
+# Default arguments
 default_args = {
     "owner": "DNC airflow",
     "depends_on_past": False,
-    "retries":20, 
+    "retries":3,
     "retry_delay":timedelta(seconds=10)
 }
 
@@ -242,34 +383,20 @@ with DAG(
     description="DNC airflow",
     # tags=["Dev"],
     start_date=datetime(2024, 4, 24, 16, 30, 0, 0, tzinfo=local_tz),
-    schedule_interval="* 18 * * 1-7",
+    schedule_interval="40 20 * * 1-7",
 ) as dag:
     
     @task
     def Get_dnc_work():
         cursor, conn = ConOracle()
+        
         try:
-            query = f"""   							
-                            SELECT
+            query = f"""
+                      SELECT
                             q.*, 
                             l.leadname, 
                             l.leadsurname,
                             a.assignstatus,
-                            
-                            -- ทะเบียนรถ
-                            (SELECT plateid 
-                            FROM tqmsale.leadcar c 
-                            WHERE c.leadid = a.leadid 
-                            AND c.leadcarid = a.leadcarid
-                            FETCH FIRST 1 ROWS ONLY) AS PLATEID,
-                            
-                            -- ข้อมูล Staff
-                            (SELECT d.departmentcode || ':' || f.staffcode || ':' || f.staffname  
-                            FROM tqmsale.V_STAFF f 
-                            JOIN tqmsale.department d ON f.departmentid = d.departmentid 
-                            WHERE f.staffid = a.staffid
-                            FETCH FIRST 1 ROWS ONLY) AS STAFF,
-                            
                             -- QC ชื่อ
                             (SELECT bytedes 
                             FROM tqmsale.sysbytedes 
@@ -278,12 +405,6 @@ with DAG(
                             AND bytecode = q.qccode
                             FETCH FIRST 1 ROWS ONLY) AS QCNAME,
 
-                            -- แจ้งห้ามโทร
-                            (SELECT TO_CHAR(requestdatetime,'YY/MM/DD') || remark
-                            FROM tqmsale.leadbypassrequest tx 
-                            WHERE tx.leadid = a.leadid 
-                            AND tx.leadassignid = a.leadassignid) AS BYPASSREQUEST,
-                            
                             -- ตรวจสอบสถานะ H (แสดง 'Y' ถ้ามีสถานะ H, 'N' ถ้าไม่มี)
                             CASE 
                                 WHEN EXISTS (
@@ -292,15 +413,9 @@ with DAG(
                                     WHERE tx.leadid = a.leadid 
                                     AND tx.leadassignid = a.leadassignid
                                     AND tx.bypassstatus = 'H'
-                                ) THEN 'Y'
-                                ELSE 'N'
+                            ) THEN 'Y'
+                            ELSE 'N'
                             END AS has_bypass_h,
-                            
-                            -- ผลลัพธ์การติดต่อล่าสุด
-                            (SELECT resultcode || ':' || resultname 
-                            FROM tqmsale.result 
-                            WHERE resultid = a.resultid
-                            FETCH FIRST 1 ROWS ONLY) AS RESULT,
                             tx.DNCENDDATE
                             FROM 
                                 tqmsale.leadqc q
@@ -311,13 +426,7 @@ with DAG(
                             --AND q.QCCODE = '10'
                             AND q.qcstatus = 'S'
                             AND tx.BYPASSSTATUS = 'H'
-                            AND TRUNC(tx.DNCENDDATE) = TRUNC(SYSDATE)
-                            AND EXISTS (
-                                        SELECT 1 
-                                        FROM tqmsale.leadbypassrequest tx 
-                                        WHERE tx.leadid = a.leadid 
-                                        AND tx.leadassignid = a.leadassignid
-                                        AND tx.bypassstatus = 'H')
+                            {dnc_dates}
                           """
             
             print("Fetching data...")
@@ -330,17 +439,19 @@ with DAG(
             # df = pd.read_sql(sql, conn)
                 
             formatted_table = df.to_markdown(index=False)
-            print(formatted_table)
+            print(f"\n{formatted_table}")
             print(f"Get data successfully")
             print(f"df: {len(df)}")
-            # send_line_notification(message)
             
-            message = f"ข้อมูล DNC มีทั้งหมดรวม {len(df)} รายการ"
+            message = f"\nข้อมูล DNC มีทั้งหมดรวม {len(df)} รายการ"
             print(message)
-            return {"Get_dnc_work":df}
-        except oracledb.Error as e:
-            print(f"Get_dnc_work : {e}")
+            # send_flex_notification_end(message)
             
+            return {"Get_dnc_work":df}
+        except oracledb.Error as error:
+            message = f'เกิดข้อผิดพลาดในการเรียกงาน DNC : {error}'
+            # message = f"Fail with task {task_id} \n error : {error}"
+            send_flex_notification_start(message)
         finally:
             cursor.close()
             conn.close() 
@@ -351,8 +462,8 @@ with DAG(
         task_id = kwargs['task_instance'].task_id
         try_number = kwargs['task_instance'].try_number
         message = f"Processing task {task_id} ,try_number {try_number}"
-        print(f"{message}")
-        # send_line_notification(message)
+        # print(f"{message}")
+        # send_flex_notification_start(message)
         
         result = ti.xcom_pull(task_ids="Process_x.Get_dnc_work", key="return_value")
         
@@ -399,15 +510,14 @@ with DAG(
                 conn.commit() 
                 print("All updates committed successfully.")
                 formatted_table = df.to_markdown(index=False)
-                print(formatted_table)
+                print(f"\n{formatted_table}")
                 message = f"จำนวนรายการที่ปรับสถานะรวม {df} รายการ"
                 print(message)
                 return {"Update_x_sum": df}
         
         except oracledb.Error as error:
             message = f"Fail with task {task_id} \n error : {error}"
-            # send_line_notification(message)
-            print(f"Oracle Database error: {error}")
+            send_flex_notification_start(message)
             conn.rollback()
             return None
         
@@ -438,12 +548,15 @@ with DAG(
             print("QCCODE 'V2T' (11):\n", df_V2T)
             print("QCCODE 'AI-Do not call' (12):\n", df_AI)
             print("QCCODE 'Mismatch number' (21):\n", df_MISMATCH_NUM)
+            
+            print (f'{"SUM จำนวนงานทั้งหมดที่ปรับสถานะ",(len(df_DNC) + len(df_V2T) + len(df_AI) + len(df_MISMATCH_NUM))}')
+
 
             # print("Merged DataFrame (df_actioncode):\n", df_actioncode)
 
         except Exception as e:
             message = f"Fail with task {task_id} \n error : {e}"
-            # send_line_notification(message)
+            send_flex_notification_start(message)
             print(f"Split_actioncode_ac Error: {e}")
             return {}
 
@@ -466,7 +579,7 @@ with DAG(
         qccode_results = ti.xcom_pull(task_ids="Process_x.Split_qccode_dnc", key="return_value")
         
         # ส่งการแจ้งเตือนแบบ Flex Message
-        send_flex_notification(qccode_results)
+        send_flex_notification_end(qccode_results)
         
         return {"status": "success"}
 
