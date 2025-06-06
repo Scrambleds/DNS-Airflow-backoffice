@@ -31,6 +31,7 @@ from linebot import LineBotApi
 from linebot.exceptions import LineBotApiError
 from linebot.models import TextSendMessage
 from linebot.models import FlexSendMessage
+import cx_Oracle
 
 config_file_path = 'config/db_config.cfg'
 config = configparser.ConfigParser()
@@ -345,23 +346,52 @@ def send_flex_notification_end(qccode_results, user_id=line_user_id_user):
         return False
     
 # Connect DB
+# def ConOracle():
+#     try:
+        
+#         env = os.getenv('ENV', 'dev')
+#         db_host = config.get(env, 'host')
+#         db_port = config.get(env, 'port')
+#         db_username = config.get(env, 'username')
+#         db_password = config.get(env, 'password')
+#         db_name = config.get(env, 'dbname')
+        
+#         dsn_name = oracledb.makedsn(db_host, db_port, service_name=db_name)
+#         conn = oracledb.connect(user=db_username, password=db_password, dsn=dsn_name)
+
+#         cursor = conn.cursor()
+#         print(f"Connecting database {db_name}")
+#         return cursor, conn
+#     except oracledb.Error as error:
+#         message = f"เกิดข้อผิดพลาดในการเชื่อมต่อกับ Oracle DB : {error}"
+#         send_flex_notification_start(message)
+#         print("เกิดข้อผิดพลาดในการเชื่อมต่อกับ Oracle DB:", error)
+#         return message, None
+    
 def ConOracle():
     try:
-        
-        env = os.getenv('ENV', 'pro')
+        env = os.getenv('ENV', 'dev')
         db_host = config.get(env, 'host')
         db_port = config.get(env, 'port')
         db_username = config.get(env, 'username')
         db_password = config.get(env, 'password')
         db_name = config.get(env, 'dbname')
-        
-        dsn_name = oracledb.makedsn(db_host, db_port, service_name=db_name)
-        conn = oracledb.connect(user=db_username, password=db_password, dsn=dsn_name)
 
+        # สร้าง DSN สำหรับ cx_Oracle
+        dsn = cx_Oracle.makedsn(db_host, db_port, service_name=db_name)
+        
+        # สร้าง connection ด้วย cx_Oracle
+        conn = cx_Oracle.connect(
+            user=db_username,
+            password=db_password,
+            dsn=dsn
+        )
+        
         cursor = conn.cursor()
-        print(f"Connecting database {db_name}")
+        print(f"Connecting database {db_name} using cx_Oracle")
         return cursor, conn
-    except oracledb.Error as error:
+        
+    except cx_Oracle.Error as error:
         message = f"เกิดข้อผิดพลาดในการเชื่อมต่อกับ Oracle DB : {error}"
         send_flex_notification_start(message)
         print("เกิดข้อผิดพลาดในการเชื่อมต่อกับ Oracle DB:", error)
