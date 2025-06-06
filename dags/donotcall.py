@@ -44,14 +44,15 @@ currentDate = currentDateAndTime.strftime("%Y-%m-%d")
 currentTime = currentDateAndTime.strftime("%H:%M:%S")
 
 line_user_id_user = config.get('variable', 'line_user_id_user')
-channel_access_token_user = config.get('variable', 'channel_access_token_user')
+line_access_token_user = config.get('variable', 'channel_access_token_user')
 
 line_user_id = config.get('variable', 'line_user_id')
-# line_channel_secret = config.get('variable', 'channel_secret')
+line_channel_secret = config.get('variable', 'channel_secret')
 line_access_token = config.get('variable', 'channel_access_token')
 
 # ตั้งค่า Line Bot API (ควรทำครั้งเดียวตอนเริ่มต้น)
 line_bot_api = LineBotApi(config.get('variable', 'channel_access_token'))
+line_bot_api_user = LineBotApi(config.get('variable', 'channel_access_token_user'))
 dnc_dates = config.get('variable', 'dnc_dates')
 
 def send_line_notification(message, user_id=line_user_id):
@@ -154,6 +155,7 @@ def send_flex_notification_start(message=None):
         )
 
         # ส่งข้อความ
+        # line_bot_api = LineBotApi(line_access_token)
         line_bot_api.push_message(line_user_id, flex_message)
         
         logging.info("Flex notification sent successfully")
@@ -163,7 +165,7 @@ def send_flex_notification_start(message=None):
         logging.error(f"Error sending Flex notification: {e}")
         return False
     
-def send_flex_notification_end(qccode_results, user_id=line_user_id):
+def send_flex_notification_end(qccode_results, user_id=line_user_id_user):
     """
     ส่ง Flex Message สรุปผลผ่าน Line Messaging API
     :param qccode_results: ผลลัพธ์จาก Split_qccode_dnc
@@ -329,8 +331,8 @@ def send_flex_notification_end(qccode_results, user_id=line_user_id):
         )
 
         # ส่งข้อความ
-        line_bot_api = LineBotApi(line_access_token)
-        line_bot_api.push_message(user_id, flex_message)
+        line_bot_api_user = LineBotApi(line_access_token_user)
+        line_bot_api_user.push_message(user_id, flex_message)
         
         logging.info("Flex notification sent successfully")
         return True
@@ -346,9 +348,7 @@ def send_flex_notification_end(qccode_results, user_id=line_user_id):
 def ConOracle():
     try:
         
-        send_flex_notification_start()
-        
-        env = os.getenv('ENV', 'pre')
+        env = os.getenv('ENV', 'preprod')
         db_host = config.get(env, 'host')
         db_port = config.get(env, 'port')
         db_username = config.get(env, 'username')
@@ -388,6 +388,9 @@ with DAG(
     
     @task
     def Get_dnc_work():
+        
+        send_flex_notification_start()
+        
         cursor, conn = ConOracle()
         
         try:
@@ -591,12 +594,12 @@ with DAG(
         Get_dnc_task = Get_dnc_work()
         Update_x_task = update_leadbypassrequest_status()
         Split_qccode_task = Split_qccode_dnc()
-        Notify_final_task = notify_final_result() 
+        Notify_final_task = notify_final_result()
         
         Get_dnc_task >> Update_x_task >> Split_qccode_task >> Notify_final_task
         
     Process_x_group = Process_x()
     
-    (        
+    (
     start >> Process_x_group >> end
     )
