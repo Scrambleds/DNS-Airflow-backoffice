@@ -396,6 +396,7 @@ def ConOracle():
         send_flex_notification_start(message)
         print("เกิดข้อผิดพลาดในการเชื่อมต่อกับ Oracle DB:", error)
         return message, None
+    
         
 # Default arguments
 default_args = {
