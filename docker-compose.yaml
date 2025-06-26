@@ -116,7 +116,7 @@ services:
     <<: *airflow-common
     command: webserver
     ports:
-      - "8888:8888"
+      - "8888:8080"
     environment:
       <<: *airflow-common-env
       PYTHONPATH: /opt/airflow:/opt/airflow/utils
