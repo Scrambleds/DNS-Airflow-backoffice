@@ -27,15 +27,46 @@ from pythainlp.util import thai_strftime
 from datetime import datetime
 import copy
 import time
-import cx_Oracle
+# import cx_Oracle
 
 config_file_path = 'config/Topsale.cfg'
 config = configparser.ConfigParser()
 config.read(config_file_path)
 local = config.get("variable","tz")
 local_tz = pendulum.timezone(local)
-currentDateAndTime = datetime.now(tz=local_tz) 
+currentDateAndTime = datetime.now(tz=local_tz)
+currentDate = currentDateAndTime.strftime("%Y-%m-%d") 
      
+# def ConOracle():
+#     try:
+#         env = os.getenv('ENV', 'dev')
+#         db_host = config.get(env, 'host')
+#         db_port = config.get(env, 'port')
+#         db_username = config.get(env, 'username')
+#         db_password = config.get(env, 'password')
+#         db_name = config.get(env, 'dbname')
+
+#         # สร้าง DSN สำหรับ cx_Oracle
+#         dsn = cx_Oracle.makedsn(db_host, db_port, service_name=db_name)
+        
+#         # สร้าง connection ด้วย cx_Oracle
+#         conn = cx_Oracle.connect(
+#             user=db_username,
+#             password=db_password,
+#             dsn=dsn
+#         )
+        
+#         cursor = conn.cursor()
+#         print(f"Connecting database {db_name} using cx_Oracle")
+#         return cursor, conn
+        
+#     except cx_Oracle.Error as error:
+#         message = f"เกิดข้อผิดพลาดในการเชื่อมต่อกับ Oracle DB : {error}"
+        
+#         print("เกิดข้อผิดพลาดในการเชื่อมต่อกับ Oracle DB:", error)
+#         return message, None
+
+# Connect DB
 def ConOracle():
     try:
         env = os.getenv('ENV', 'dev')
@@ -44,32 +75,61 @@ def ConOracle():
         db_username = config.get(env, 'username')
         db_password = config.get(env, 'password')
         db_name = config.get(env, 'dbname')
+        
+        dsn_name = oracledb.makedsn(db_host, db_port, service_name=db_name)
+        conn = oracledb.connect(user=db_username, password=db_password, dsn=dsn_name)
 
-        # สร้าง DSN สำหรับ cx_Oracle
-        dsn = cx_Oracle.makedsn(db_host, db_port, service_name=db_name)
-        
-        # สร้าง connection ด้วย cx_Oracle
-        conn = cx_Oracle.connect(
-            user=db_username,
-            password=db_password,
-            dsn=dsn
-        )
-        
         cursor = conn.cursor()
-        print(f"Connecting database {db_name} using cx_Oracle")
+        print(f"Connecting database {db_name}")
         return cursor, conn
-        
-    except cx_Oracle.Error as error:
+    except oracledb.Error as error:
         message = f"เกิดข้อผิดพลาดในการเชื่อมต่อกับ Oracle DB : {error}"
-        
         print("เกิดข้อผิดพลาดในการเชื่อมต่อกับ Oracle DB:", error)
         return message, None
-        
+
+def Get_Holidays():
+    cursor, conn = ConOracle()
+    try:
+        cursor.execute(
+            """
+                SELECT * FROM XININSURE.HOLIDAY h
+                WHERE h.FISCALYEAR = extract(year from sysdate)
+            """
+        )
+        df = pd.DataFrame(
+            cursor.fetchall(), columns=[desc[0] for desc in cursor.description]
+        )
+        print(df)
+        print(f"Get data successfully")
+        return df
+    except oracledb.Error as e:
+        print(f"Get_holidays : {e}")
+        return None
+    finally:
+        cursor.close()
+        conn.close()
+
+def Check_Holiday(df):
+    try:
+        holiday_dates = df["HOLIDAYDATE"].dt.strftime("%Y-%m-%d")
+        print(f"Holiday Dates: \n  {holiday_dates}")
+        print(f"Today : {currentDate}")
+        if currentDate in holiday_dates.values:
+            print("Today is a holiday. Ending DAG.")
+            return "Holiday_path"
+            
+        else:
+            print("Today is not a holiday. Proceeding with work path.")
+            return "Work_path"
+    except Exception as e:
+        print(f"Check Holiday error: {e}")
+        raise e
+            
 # Default arguments
 default_args = {
     "owner": "DCP",
     "depends_on_past": False,
-    "retries":3,
+    "retries":1,
     "retry_delay":timedelta(seconds=10)
 }
 
@@ -81,50 +141,47 @@ with DAG(
     description="Topsale airflow",
     tags=["DCP"],
     start_date=datetime(2024, 4, 24, 16, 30, 0, 0, tzinfo=local_tz),
-    schedule_interval="*/10 7-22 * * *",  # ทุกๆ 10 นาที จาก 7:00 ถึง 22:00 ทุกวัน
+    schedule_interval="*/10 8-20 * * *",  # ทุกๆ 10 นาที จาก 8:00 ถึง 20:00 ทุกวัน
 ) as dag:
     
-    @task
-    def Get_dnc_work():
+    @task.branch
+    def Input(**kwargs):
+        ti = kwargs["ti"]
+        task_id = kwargs['task_instance'].task_id
+        try_number = kwargs['task_instance'].try_number
+        message = f"Processing task {task_id} ,try_number {try_number}"
+        print(f"{message}")
+        
+        try: 
+            df = Get_Holidays()
+            result = Check_Holiday(df)
+            print(result)
+            message = f"Continue with {result}"
+            if result == "Holiday_path":
+                return result
             
+            else:
+                df = delete_MK()
+                message += f"\nยกเลิก {len(df)} รายการ"
+                print(f"\n {df.to_markdown()}")
+
+                ti.xcom_push(key="Cancelled_work", value=df)
+                return result
+        except Exception as e:
+            print(1)
+            message = f"Fail with task {task_id} \n error : {e}"
+            print(f"Input : {e}")
+        finally:
+            print(f"{message}")    
+            
+    @task
+    def insert_MK():
+
         cursor, conn = ConOracle()
         
         try:
             query = f"""
-                      SELECT
-                            q.*, 
-                            l.leadname, 
-                            l.leadsurname,
-                            a.assignstatus,
-                            -- QC ชื่อ
-                            (SELECT bytedes 
-                            FROM tqmsale.sysbytedes 
-                            WHERE tablename = 'LEADQC' 
-                            AND columnname = 'QCCODE' 
-                            AND bytecode = q.qccode
-                            FETCH FIRST 1 ROWS ONLY) AS QCNAME,
-
-                            -- ตรวจสอบสถานะ H (แสดง 'Y' ถ้ามีสถานะ H, 'N' ถ้าไม่มี)
-                            CASE 
-                                WHEN EXISTS (
-                                    SELECT 1 
-                                    FROM tqmsale.leadbypassrequest tx 
-                                    WHERE tx.leadid = a.leadid 
-                                    AND tx.leadassignid = a.leadassignid
-                                    AND tx.bypassstatus = 'H'
-                            ) THEN 'Y'
-                            ELSE 'N'
-                            END AS has_bypass_h,
-                            tx.DNCENDDATE
-                            FROM 
-                                tqmsale.leadqc q
-                                LEFT JOIN tqmsale.leadassign a ON q.leadid = a.leadid AND q.leadassignid = a.leadassignid
-                                JOIN tqmsale.VIEW_LEAD_LO l ON q.leadid = l.leadid
-                                LEFT JOIN tqmsale.leadbypassrequest tx ON q.leadid = tx.leadid AND q.leadassignid = tx.leadassignid
-                            WHERE 1=1
-                            --AND q.QCCODE = '10'
-                            AND q.qcstatus = 'S'
-                            AND tx.BYPASSSTATUS = 'H'
+                    SELECT * FROM TQMSALE.TOPSALE@TQMSALE
                           """
             
             print("Fetching data...")
@@ -141,13 +198,87 @@ with DAG(
             print(f"Get data successfully")
             print(f"df: {len(df)}")
             
-            message = f"\nข้อมูล DNC มีทั้งหมดรวม {len(df)} รายการ"
+            message = f"\nข้อมูลมีทั้งหมดรวม {len(df)} รายการ"
             print(message)
             # send_flex_notification_end(message)
             
-            return {"Get_dnc_work":df}
+            return {"delete_MK":df}
         except oracledb.Error as error:
-            message = f'เกิดข้อผิดพลาดในการเรียกงาน DNC : {error}'
+            message = f'เกิดข้อผิดพลาด : {error}'
+            # message = f"Fail with task {task_id} \n error : {error}"
+            
+        finally:
+            cursor.close()
+            conn.close() 
+            
+    @task
+    def insert_MB():
+
+        cursor, conn = ConOracle()
+        
+        try:
+            query = f"""
+                    SELECT * FROM TQMSALE.TOPSALE@TQMSALE
+                          """
+            
+            print("Fetching data...")
+            cursor.execute(query)
+            df = pd.DataFrame(
+                cursor.fetchall(), columns=[desc[0] for desc in cursor.description]
+            )
+            
+            # print(query)
+            # df = pd.read_sql(sql, conn)
+                
+            formatted_table = df.to_markdown(index=False)
+            print(f"\n{formatted_table}")
+            print(f"Get data successfully")
+            print(f"df: {len(df)}")
+            
+            message = f"\nข้อมูลมีทั้งหมดรวม {len(df)} รายการ"
+            print(message)
+            # send_flex_notification_end(message)
+            
+            return {"delete_MK":df}
+        except oracledb.Error as error:
+            message = f'เกิดข้อผิดพลาด : {error}'
+            # message = f"Fail with task {task_id} \n error : {error}"
+            
+        finally:
+            cursor.close()
+            conn.close() 
+                   
+    @task
+    def insert_CS():
+
+        cursor, conn = ConOracle()
+        
+        try:
+            query = f"""
+                    SELECT * FROM TQMSALE.TOPSALE@TQMSALE
+                          """
+            
+            print("Fetching data...")
+            cursor.execute(query)
+            df = pd.DataFrame(
+                cursor.fetchall(), columns=[desc[0] for desc in cursor.description]
+            )
+            
+            # print(query)
+            # df = pd.read_sql(sql, conn)
+                
+            formatted_table = df.to_markdown(index=False)
+            print(f"\n{formatted_table}")
+            print(f"Get data successfully")
+            print(f"df: {len(df)}")
+            
+            message = f"\nข้อมูลมีทั้งหมดรวม {len(df)} รายการ"
+            print(message)
+            # send_flex_notification_end(message)
+            
+            return {"delete_MK":df}
+        except oracledb.Error as error:
+            message = f'เกิดข้อผิดพลาด : {error}'
             # message = f"Fail with task {task_id} \n error : {error}"
             
         finally:
@@ -155,129 +286,165 @@ with DAG(
             conn.close() 
     
     @task
-    def update_leadbypassrequest_status(**kwargs):
-        ti = kwargs["ti"]
-        task_id = kwargs['task_instance'].task_id
-        try_number = kwargs['task_instance'].try_number
-        message = f"Processing task {task_id} ,try_number {try_number}"
-        # print(f"{message}")
-        # 
-        
-        result = ti.xcom_pull(task_ids="Process_x.Get_dnc_work", key="return_value")
-        
-        # แสดงผลลัพธ์ที่ดึงมาจาก XCom
-        print("XCom result from Get_dnc_work:", result)
-        
-        df = result["Get_dnc_work"]
-        
+    def delete_MK():
+
         cursor, conn = ConOracle()
         
         try:
-            if df is None or df.empty:
-                print("DataFrame is empty. Exiting task.")
-                return {"Update_x_sum": df}
-            else:
-                update_status_query_X = """
-                        UPDATE TQMSALE.LEADBYPASSREQUEST Q
-                        SET Q.BYPASSSTATUS = 'X'
-                        WHERE Q.LEADID = :leadid
-                        AND Q.LEADASSIGNID = :leadassignid
-                        AND Q.BYPASSSTATUS = 'H'
-                    """
-                    
-                i = 0
-                for index, row in df.iterrows():
-                    cursor.execute(update_status_query_X, {'leadid': row['LEADID'], 'leadassignid': row['LEADASSIGNID']})
-                    print(f"Number: {i+1} Updated Bypassstatus to X row {index}: leadid={row['LEADID']}, leadassignid={row['LEADASSIGNID']}")
-                    i+=1
-                    
-                update_status_query_N = """
-                        UPDATE TQMSALE.LEADASSIGN a
-                        SET a.ASSIGNSTATUS = 'N'
-                        WHERE a.LEADID = :leadid
-                        AND a.LEADASSIGNID = :leadassignid
-                        AND a.ASSIGNSTATUS NOT IN ('N')
-                    """
-                    
-                i = 0
-                for index, row in df.iterrows():
-                    cursor.execute(update_status_query_N, {'leadid': row['LEADID'], 'leadassignid': row['LEADASSIGNID']})
-                    print(f"Number: {i+1} Updated Assignstatus to N row {index}: leadid={row['LEADID']}, leadassignid={row['LEADASSIGNID']}")
-                    i+=1
-                
-                conn.commit() 
-                print("All updates committed successfully.")
-                formatted_table = df.to_markdown(index=False)
-                print(f"\n{formatted_table}")
-                message = f"จำนวนรายการที่ปรับสถานะรวม {df} รายการ"
-                print(message)
-                return {"Update_x_sum": df}
-        
-        except oracledb.Error as error:
-            message = f"Fail with task {task_id} \n error : {error}"
+            query = f"""
+                    SELECT * FROM TQMSALE.TOPSALE@TQMSALE
+                          """
             
-            conn.rollback()
-            return None
-        
-        finally:
-            if cursor:
-                cursor.close()
-            if conn:
-                conn.close()        
+            print("Fetching data...")
+            cursor.execute(query)
+            df = pd.DataFrame(
+                cursor.fetchall(), columns=[desc[0] for desc in cursor.description]
+            )
+            
+            # print(query)
+            # df = pd.read_sql(sql, conn)
                 
+            formatted_table = df.to_markdown(index=False)
+            print(f"\n{formatted_table}")
+            print(f"Get data successfully")
+            print(f"df: {len(df)}")
+            
+            message = f"\nข้อมูลมีทั้งหมดรวม {len(df)} รายการ"
+            print(message)
+            # send_flex_notification_end(message)
+            
+            return {"delete_MK":df}
+        except oracledb.Error as error:
+            message = f'เกิดข้อผิดพลาด : {error}'
+            # message = f"Fail with task {task_id} \n error : {error}"
+            
+        finally:
+            cursor.close()
+            conn.close() 
+            
     @task
-    def Split_qccode_dnc(**kwargs):
-        ti = kwargs["ti"]
-        task_id = kwargs['task_instance'].task_id
-        try_number = kwargs['task_instance'].try_number
-        message = f"Processing task {task_id} ,try_number {try_number}"
-        print(f"{message}")
-        
-        result = ti.xcom_pull(task_ids="Process_x.update_leadbypassrequest_status", key="return_value")
-        df = result.get("Update_x_sum", pd.DataFrame())
+    def delete_MB():
+
+        cursor, conn = ConOracle()
         
         try:
-            df_DNC = df.query("QCCODE == '10'")
-            df_V2T = df.query("QCCODE == '11'")
-            df_AI = df.query("QCCODE == '12'")
-            df_MISMATCH_NUM = df.query("QCCODE == '21'")
+            query = f"""
+                    SELECT * FROM TQMSALE.TOPSALE@TQMSALE
+                          """
+            
+            print("Fetching data...")
+            cursor.execute(query)
+            df = pd.DataFrame(
+                cursor.fetchall(), columns=[desc[0] for desc in cursor.description]
+            )
+            
+            # print(query)
+            # df = pd.read_sql(sql, conn)
+                
+            formatted_table = df.to_markdown(index=False)
+            print(f"\n{formatted_table}")
+            print(f"Get data successfully")
+            print(f"df: {len(df)}")
+            
+            message = f"\nข้อมูลมีทั้งหมดรวม {len(df)} รายการ"
+            print(message)
+            # send_flex_notification_end(message)
+            
+            return {"delete_MK":df}
+        except oracledb.Error as error:
+            message = f'เกิดข้อผิดพลาด : {error}'
+            # message = f"Fail with task {task_id} \n error : {error}"
+            
+        finally:
+            cursor.close()
+            conn.close() 
+            
+    @task
+    def delete_CS():
+
+        cursor, conn = ConOracle()
         
-            print("QCCODE 'Do not call list' (10):\n", df_DNC)
-            print("QCCODE 'V2T' (11):\n", df_V2T)
-            print("QCCODE 'AI-Do not call' (12):\n", df_AI)
-            print("QCCODE 'Mismatch number' (21):\n", df_MISMATCH_NUM)
+        try:
+            query = f"""
+                    SELECT * FROM TQMSALE.TOPSALE@TQMSALE
+                          """
             
-            print (f'{"SUM จำนวนงานทั้งหมดที่ปรับสถานะ",(len(df_DNC) + len(df_V2T) + len(df_AI) + len(df_MISMATCH_NUM))}')
-
-
-            # print("Merged DataFrame (df_actioncode):\n", df_actioncode)
-
-        except Exception as e:
-            message = f"Fail with task {task_id} \n error : {e}"
+            print("Fetching data...")
+            cursor.execute(query)
+            df = pd.DataFrame(
+                cursor.fetchall(), columns=[desc[0] for desc in cursor.description]
+            )
             
-            print(f"Split_actioncode_ac Error: {e}")
-            return {}
-
-        return {
-            "df_DNC": df_DNC,
-            "df_V2T": df_V2T,
-            "df_AI": df_AI,
-            "df_MISMATCH_NUM": df_MISMATCH_NUM
-        }
+            # print(query)
+            # df = pd.read_sql(sql, conn)
+                
+            formatted_table = df.to_markdown(index=False)
+            print(f"\n{formatted_table}")
+            print(f"Get data successfully")
+            print(f"df: {len(df)}")
+            
+            message = f"\nข้อมูลมีทั้งหมดรวม {len(df)} รายการ"
+            print(message)
+            # send_flex_notification_end(message)
+            
+            return {"delete_MK":df}
+        except oracledb.Error as error:
+            message = f'เกิดข้อผิดพลาด : {error}'
+            # message = f"Fail with task {task_id} \n error : {error}"
+            
+        finally:
+            cursor.close()
+            conn.close() 
 
     start = EmptyOperator(task_id="start", trigger_rule="none_failed_min_one_success")
     end = EmptyOperator(task_id="end", trigger_rule="none_failed_min_one_success")
+    # Insert_Mk = EmptyOperator(task_id="Insert_Mk", trigger_rule="none_failed_min_one_success")
+    Holiday_path = EmptyOperator(task_id="Holiday_path", trigger_rule="none_failed_min_one_success")
+    Work_path = EmptyOperator(task_id="Work_path", trigger_rule="none_failed_min_one_success")
+    Join_mb = EmptyOperator(task_id="Join_mb", trigger_rule="none_failed_min_one_success")
+    Join_mk = EmptyOperator(task_id="Join_mk", trigger_rule="none_failed_min_one_success")
+    Join_cs = EmptyOperator(task_id="Join_cs", trigger_rule="none_failed_min_one_success")
+    # delete_MB_task = EmptyOperator(task_id="delete_MB_task", trigger_rule="none_failed_min_one_success")
+    # Insert_MB = EmptyOperator(task_id="Insert_MB", trigger_rule="none_failed_min_one_success")
+    # Insert_CS = EmptyOperator(task_id="Insert_CS", trigger_rule="none_failed_min_one_success")
+
+    Input_task = Input()
     
     @task_group
-    def Process_x():
-        Get_dnc_task = Get_dnc_work()
-        Update_x_task = update_leadbypassrequest_status()
-        Split_qccode_task = Split_qccode_dnc()
+    def Group_MK():
+        delete_MK_task = delete_MK()
+        insert_MK_task = insert_MK()
+        delete_MK_task >> insert_MK_task
+        # >> Update_x_task >> Split_qccode_task
         
-        Get_dnc_task >> Update_x_task >> Split_qccode_task
+    Process_MK_group = Group_MK()
+    
+    @task_group
+    def Group_MB():
+        delete_MB_task = delete_MB()
+        insert_MB_task = insert_MB()
+        delete_MB_task >> insert_MB_task
+        # >> Update_x_task >> Split_qccode_task
         
-    Process_x_group = Process_x()
+    Process_MB_group = Group_MB()
+    
+    @task_group
+    def Group_CS():
+        delete_CS_task = delete_CS()
+        insert_CS_task = insert_CS()
+        delete_CS_task >> insert_CS_task
+        # >> Update_x_task >> Split_qccode_task
+        
+    Process_CS_group = Group_CS()
     
     (
-    start >> Process_x_group >> end
+        start >> Input_task >> [Holiday_path,Work_path],
+        Holiday_path >> end,
+        Work_path >> [Join_mk, Join_mb, Join_cs], 
+        
+        Join_mk >> Process_MK_group >> end,
+        
+        Join_mb >> Process_MB_group >> end,
+             
+        Join_cs >> Process_CS_group >> end,
     )
