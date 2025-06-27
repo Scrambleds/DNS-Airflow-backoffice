@@ -103,7 +103,7 @@ with DAG(
     description="Topsale airflow",
     tags=["DCP"],
     start_date=datetime(2024, 4, 24, 16, 30, 0, 0, tzinfo=local_tz),
-    schedule_interval="30-59/10 8,9-19 * * *",
+    schedule_interval="30/10 8-20 * * *"  # 8:30-20:30 (แต่จะหยุดที่ 20:00)
 ) as dag:
     
     @task.branch
