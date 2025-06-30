@@ -98,6 +98,8 @@ def Get_Holidays():
             cursor.fetchall(), columns=[desc[0] for desc in cursor.description]
         )
         print(df)
+        formatted_table = df.to_markdown(index=False)
+        print(f"\n{formatted_table}")
         print(f"Get data successfully")
         return df
     except oracledb.Error as e:
@@ -110,7 +112,9 @@ def Get_Holidays():
 def Check_Holiday(df):
     try:
         holiday_dates = df["HOLIDAYDATE"].dt.strftime("%Y-%m-%d")
-        print(f"Holiday Dates: \n  {holiday_dates}")
+        # print(f"Holiday Dates: \n  {holiday_dates}")
+        formatted_table = holiday_dates.to_markdown(index=False)
+        print(f"\n{formatted_table}")
         print(f"Today : {currentDate}")
         if currentDate in holiday_dates.values:
             print("Today is a holiday. Ending DAG.")
