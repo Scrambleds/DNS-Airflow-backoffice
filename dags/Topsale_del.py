@@ -28,6 +28,35 @@ local_tz = pendulum.timezone(local)
 currentDateAndTime = datetime.now(tz=local_tz)
 currentDate = currentDateAndTime.strftime("%Y-%m-%d") 
 get_dates = config.get('variable', 'get_dates')
+
+# def ConOracle():
+#     try:
+#         env = os.getenv('ENV', 'dev')
+#         db_host = config.get(env, 'host')
+#         db_port = config.get(env, 'port')
+#         db_username = config.get(env, 'username')
+#         db_password = config.get(env, 'password')
+#         db_name = config.get(env, 'dbname')
+
+#         # สร้าง DSN สำหรับ cx_Oracle
+#         dsn = cx_Oracle.makedsn(db_host, db_port, service_name=db_name)
+        
+#         # สร้าง connection ด้วย cx_Oracle
+#         conn = cx_Oracle.connect(
+#             user=db_username,
+#             password=db_password,
+#             dsn=dsn
+#         )
+        
+#         cursor = conn.cursor()
+#         print(f"Connecting database {db_name} using cx_Oracle")
+#         return cursor, conn
+        
+#     except cx_Oracle.Error as error:
+#         message = f"เกิดข้อผิดพลาดในการเชื่อมต่อกับ Oracle DB : {error}"
+#         send_flex_notification_start(message)
+#         print("เกิดข้อผิดพลาดในการเชื่อมต่อกับ Oracle DB:", error)
+#         return message, None
      
 def ConOracle():
     try:
@@ -102,7 +131,7 @@ with DAG(
     description="Topsale airflow",
     tags=["DCP"],
     start_date=datetime(2024, 4, 24, 16, 30, 0, 0, tzinfo=local_tz),
-    schedule_interval="30/10 8-20 * * *"  # 8:30-20:30 (แต่จะหยุดที่ 20:00)
+    schedule_interval="30-59/10 8-19 * * *",  # ทุก 10 นาทีตั้งแต่ 8:30-19:50
 ) as dag:
     
     @task.branch
@@ -285,7 +314,7 @@ with DAG(
             
             conn.commit() 
             
-            return {"Insert_MK": df}
+            return {"Insert_MK": len(df)}
             
         except oracledb.Error as error:
             conn.rollback()  
@@ -439,7 +468,7 @@ with DAG(
             
             conn.commit() 
             
-            return {"Insert_MB": df}
+            return {"Insert_MB": len(df)}
         except oracledb.Error as error:
             conn.rollback()
             message = f'เกิดข้อผิดพลาด : {error}'
@@ -569,53 +598,187 @@ with DAG(
             cursor.close()
             conn.close() 
     
+    # @task
+    # def delete_MK():
+    #     cursor, conn = ConOracle()
+    #     try:
+    #         query = "DELETE FROM TQMSALE.TOPSALE@TQMSALE WHERE TEAM = 'MK'"
+    #         cursor.execute(query)
+    #         conn.commit() 
+    #         print("MK data deleted successfully")
+    #         return {"delete_MK": "success"}
+    #     except oracledb.Error as error:
+    #         message = f'เกิดข้อผิดพลาด : {error}'
+    #         print(message)
+    #         return {"delete_MK": "error"}
+    #     finally:
+    #         cursor.close()
+    #         conn.close()
+    
     @task
     def delete_MK():
         cursor, conn = ConOracle()
         try:
-            query = "DELETE FROM TQMSALE.TOPSALE@TQMSALE WHERE TEAM = 'MK'"
-            cursor.execute(query)
-            conn.commit() 
-            print("MK data deleted successfully")
-            return {"delete_MK": "success"}
+            # 1. ดึงข้อมูลที่จะลบก่อน
+            select_query = "SELECT * FROM TQMSALE.TOPSALE@TQMSALE WHERE TEAM = 'MK'"
+            cursor.execute(select_query)
+            records_to_delete = cursor.fetchall()
+            
+            # 2. แสดงข้อมูลที่จะลบ (แบบ Markdown)
+            if records_to_delete:
+                df = pd.DataFrame(
+                    records_to_delete,
+                    columns=[desc[0] for desc in cursor.description]
+                )
+                print(f"\nกำลังจะลบข้อมูลทีม MK ทั้งหมด {len(records_to_delete)} รายการ:")
+                # print(df.to_markdown(index=False))
+                formatted_table = df.to_markdown(index=False)
+                print(f"\n{formatted_table}")
+            else:
+                print("ไม่พบข้อมูลทีม MK ในระบบ")
+                return {"delete_MK": "success", "deleted_count": 0}
+                
+            # 3. ลบข้อมูล
+            delete_query = "DELETE FROM TQMSALE.TOPSALE@TQMSALE WHERE TEAM = 'MK'"
+            cursor.execute(delete_query)
+            conn.commit()
+            
+            print("\nMK data deleted successfully")
+            print(f"Total records deleted: {len(records_to_delete)}")
+            
+            return {
+                "delete_MK": "success",
+                "deleted_count": len(records_to_delete)
+            }
         except oracledb.Error as error:
-            message = f'เกิดข้อผิดพลาด : {error}'
+            conn.rollback()  # Rollback หากเกิดข้อผิดพลาด
+            message = f'เกิดข้อผิดพลาดในการลบข้อมูลทีม MK: {error}'
             print(message)
-            return {"delete_MK": "error"}
+            return {"delete_MK": "error", "message": str(error)}
         finally:
             cursor.close()
             conn.close()
 
+    # @task
+    # def delete_MB():
+    #     cursor, conn = ConOracle()
+    #     try:
+    #         query = "DELETE FROM TQMSALE.TOPSALE@TQMSALE WHERE TEAM = 'MB'"
+    #         cursor.execute(query)
+    #         conn.commit() 
+    #         print("MB data deleted successfully")
+    #         return {"delete_MB": "success"}
+    #     except oracledb.Error as error:
+    #         message = f'เกิดข้อผิดพลาด : {error}'
+    #         print(message)
+    #         return {"delete_MB": "error"}
+    #     finally:
+    #         cursor.close()
+    #         conn.close()
+    
     @task
     def delete_MB():
         cursor, conn = ConOracle()
         try:
-            query = "DELETE FROM TQMSALE.TOPSALE@TQMSALE WHERE TEAM = 'MB'"
-            cursor.execute(query)
-            conn.commit() 
-            print("MB data deleted successfully")
-            return {"delete_MB": "success"}
+            # 1. ดึงข้อมูลที่จะลบก่อน
+            select_query = "SELECT * FROM TQMSALE.TOPSALE@TQMSALE WHERE TEAM = 'MB'"
+            cursor.execute(select_query)
+            records_to_delete = cursor.fetchall()  # ดึงข้อมูลทั้งหมด
+            
+            # 2. แสดงข้อมูลที่จะลบ
+            print(f"กำลังจะลบข้อมูลทีม MB ทั้งหมด {len(records_to_delete)} รายการ:")
+            
+            # สร้าง DataFrame เพื่อแสดงผลแบบ Markdown
+            if records_to_delete:
+                df = pd.DataFrame(
+                    records_to_delete,
+                    columns=[desc[0] for desc in cursor.description]
+                )
+                # print(df.to_markdown(index=False))
+                formatted_table = df.to_markdown(index=False)
+                print(f"\n{formatted_table}")
+            else:
+                print("ไม่พบข้อมูลทีม MB ในระบบ")
+                
+            # 3. ลบข้อมูล
+            delete_query = "DELETE FROM TQMSALE.TOPSALE@TQMSALE WHERE TEAM = 'MB'"
+            cursor.execute(delete_query)
+            conn.commit()
+            
+            print("\nMB data deleted successfully")
+            print(f"Total records deleted: {len(records_to_delete)}")
+            
+            return {
+                "delete_MB": "success",
+                "deleted_count": len(records_to_delete)
+            }
         except oracledb.Error as error:
+            conn.rollback()
             message = f'เกิดข้อผิดพลาด : {error}'
             print(message)
-            return {"delete_MB": "error"}
+            return {"delete_MB": "error", "message": message}
         finally:
             cursor.close()
             conn.close()
 
+    # @task
+    # def delete_CS():
+    #     cursor, conn = ConOracle()
+    #     try:
+    #         query = "DELETE FROM TQMSALE.TOPSALE@TQMSALE WHERE TEAM = 'CS'"
+    #         cursor.execute(query)
+    #         conn.commit()
+    #         print("CS data deleted successfully")
+    #         return {"delete_CS": "success"}
+    #     except oracledb.Error as error:
+    #         message = f'เกิดข้อผิดพลาด : {error}'
+    #         print(message)
+    #         return {"delete_CS": "error"}
+    #     finally:
+    #         cursor.close()
+    #         conn.close()
+    
     @task
     def delete_CS():
         cursor, conn = ConOracle()
         try:
-            query = "DELETE FROM TQMSALE.TOPSALE@TQMSALE WHERE TEAM = 'CS'"
-            cursor.execute(query)
+            # 1. ดึงข้อมูลที่จะลบก่อน
+            select_query = "SELECT * FROM TQMSALE.TOPSALE@TQMSALE WHERE TEAM = 'CS'"
+            cursor.execute(select_query)
+            records_to_delete = cursor.fetchall()  # ดึงข้อมูลทั้งหมด
+            
+            # 2. แสดงข้อมูลที่จะลบ
+            print(f"กำลังจะลบข้อมูลทีม CS ทั้งหมด {len(records_to_delete)} รายการ:")
+            
+            # สร้าง DataFrame เพื่อแสดงผลแบบ Markdown
+            if records_to_delete:
+                df = pd.DataFrame(
+                    records_to_delete,
+                    columns=[desc[0] for desc in cursor.description]
+                )
+                # print(df.to_markdown(index=False))
+                formatted_table = df.to_markdown(index=False)
+                print(f"\n{formatted_table}")
+            else:
+                print("ไม่พบข้อมูลทีม CS ในระบบ")
+                
+            # 3. ลบข้อมูล
+            delete_query = "DELETE FROM TQMSALE.TOPSALE@TQMSALE WHERE TEAM = 'CS'"
+            cursor.execute(delete_query)
             conn.commit()
-            print("CS data deleted successfully")
-            return {"delete_CS": "success"}
+            
+            print("\nCS data deleted successfully")
+            print(f"Total records deleted: {len(records_to_delete)}")
+            
+            return {
+                "delete_CS": "success",
+                "deleted_count": len(records_to_delete)
+            }
         except oracledb.Error as error:
+            conn.rollback()
             message = f'เกิดข้อผิดพลาด : {error}'
             print(message)
-            return {"delete_CS": "error"}
+            return {"delete_CS": "error", "message": message}
         finally:
             cursor.close()
             conn.close()
