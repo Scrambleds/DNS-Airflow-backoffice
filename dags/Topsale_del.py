@@ -26,8 +26,15 @@ config.read(config_file_path)
 local = config.get("variable","tz")
 local_tz = pendulum.timezone(local)
 currentDateAndTime = datetime.now(tz=local_tz)
-currentDate = currentDateAndTime.strftime("%Y-%m-%d") 
+currentDate = currentDateAndTime.strftime("%Y-%m-%d")
+# yesterdatDate = currentDate - 1
+yesterdayDate = (currentDateAndTime - timedelta(days=1)).strftime("%Y-%m-%d")
 get_dates = config.get('variable', 'get_dates')
+now = datetime.now(local_tz)
+start_date = now.replace(hour=8, minute=30, second=0, microsecond=0, tzinfo=local_tz)
+# ถ้าปัจจุบันยังไม่ถึง 8:30 น. ให้ใช้ 8:30 น. ของวันก่อนหน้า
+if now < start_date:
+    start_date = start_date - timedelta(days=1)
 
 # def ConOracle():
 #     try:
@@ -130,8 +137,9 @@ with DAG(
     max_active_runs=1,
     description="Topsale airflow",
     tags=["DCP"],
-    start_date=datetime(2024, 4, 24, 16, 30, 0, 0, tzinfo=local_tz),
-    schedule_interval="30-59/10 8-19 * * *",  # ทุก 10 นาทีตั้งแต่ 8:30-19:50
+    # start_date=datetime(2024, 4, 24, 16, 30, 0, 0, tzinfo=local_tz),
+    start_date=start_date,  # ใช้ start_date ที่คำนวณแล้ว
+    schedule_interval="*/10 8-19 * * *",
 ) as dag:
     
     @task.branch
