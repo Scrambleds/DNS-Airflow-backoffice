@@ -16,7 +16,6 @@ from os import path
 import base64
 import io
 import logging
-from pythainlp.util import thai_strftime
 from datetime import datetime
 import copy
 import time
