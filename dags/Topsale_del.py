@@ -39,20 +39,28 @@ if now < start_date:
 
 # def ConOracle_TQMSALE():
 #     try:
-#         env = os.getenv('ENV', 'tqmsale_pro')
+#         env = os.getenv('ENV', 'tqmsale_preprod')
 #         db_host = config.get(env, 'host_tqmsale')
 #         db_port = config.get(env, 'port_tqmsale')
 #         db_username = config.get(env, 'username_tqmsale')
 #         db_password = config.get(env, 'password_tqmsale')
 #         db_name = config.get(env, 'dbname_tqmsale')
-        
-#         dsn_name = oracledb.makedsn(db_host, db_port, service_name=db_name)
-#         conn = oracledb.connect(user=db_username, password=db_password, dsn=dsn_name)
 
+#         # สร้าง DSN สำหรับ cx_Oracle
+#         dsn = cx_Oracle.makedsn(db_host, db_port, service_name=db_name)
+        
+#         # สร้าง connection ด้วย cx_Oracle
+#         conn = cx_Oracle.connect(
+#             user=db_username,
+#             password=db_password,
+#             dsn=dsn
+#         )
+        
 #         cursor = conn.cursor()
-#         print(f"Connecting database {db_name}")
+#         print(f"Connecting database {db_name} using cx_Oracle")
 #         return cursor, conn
-#     except oracledb.Error as error:
+        
+#     except cx_Oracle.Error as error:
 #         message = f"เกิดข้อผิดพลาดในการเชื่อมต่อกับ Oracle DB : {error}"
 #         print("เกิดข้อผิดพลาดในการเชื่อมต่อกับ Oracle DB:", error)
 #         return message, None
@@ -60,28 +68,7 @@ if now < start_date:
 # Connect DB
 def ConOracle_TQMSALE():
     try:
-        env = os.getenv('ENV', 'tqmsale_dev')
-        db_host = config.get(env, 'host_tqmsale')
-        db_port = config.get(env, 'port_tqmsale')
-        db_username = config.get(env, 'username_tqmsale')
-        db_password = config.get(env, 'password_tqmsale')
-        db_name = config.get(env, 'dbname_tqmsale')
-        
-        dsn_name = oracledb.makedsn(db_host, db_port, service_name=db_name)
-        conn = oracledb.connect(user=db_username, password=db_password, dsn=dsn_name)
-
-        cursor = conn.cursor()
-        print(f"Connecting database {db_name}")
-        return cursor, conn
-    except oracledb.Error as error:
-        message = f"เกิดข้อผิดพลาดในการเชื่อมต่อกับ Oracle DB : {error}"
-        print("เกิดข้อผิดพลาดในการเชื่อมต่อกับ Oracle DB:", error)
-        return message, None
-
-# Connect DB
-def ConOracle_TQMSALE():
-    try:
-        env = os.getenv('ENV', 'tqmsale_dev')
+        env = os.getenv('ENV', 'tqmsale_preprod')
         db_host = config.get(env, 'host_tqmsale')
         db_port = config.get(env, 'port_tqmsale')
         db_username = config.get(env, 'username_tqmsale')
@@ -101,7 +88,7 @@ def ConOracle_TQMSALE():
      
 def ConOracle_Oracle():
     try:
-        env = os.getenv('ENV', 'xininsure_dev')
+        env = os.getenv('ENV', 'xininsure_preprod')
         db_host = config.get(env, 'host_xininsure')
         db_port = config.get(env, 'port_xininsure')
         db_username = config.get(env, 'username_xininsure')
