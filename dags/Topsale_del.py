@@ -37,34 +37,46 @@ start_date = now.replace(hour=8, minute=30, second=0, microsecond=0, tzinfo=loca
 if now < start_date:
     start_date = start_date - timedelta(days=1)
 
-# def ConOracle_Oracle():
+# def ConOracle_TQMSALE():
 #     try:
-#         env = os.getenv('ENV', 'dev')
-#         db_host = config.get(env, 'host')
-#         db_port = config.get(env, 'port')
-#         db_username = config.get(env, 'username')
-#         db_password = config.get(env, 'password')
-#         db_name = config.get(env, 'dbname')
+#         env = os.getenv('ENV', 'tqmsale_pro')
+#         db_host = config.get(env, 'host_tqmsale')
+#         db_port = config.get(env, 'port_tqmsale')
+#         db_username = config.get(env, 'username_tqmsale')
+#         db_password = config.get(env, 'password_tqmsale')
+#         db_name = config.get(env, 'dbname_tqmsale')
+        
+#         dsn_name = oracledb.makedsn(db_host, db_port, service_name=db_name)
+#         conn = oracledb.connect(user=db_username, password=db_password, dsn=dsn_name)
 
-#         # สร้าง DSN สำหรับ cx_Oracle
-#         dsn = cx_Oracle.makedsn(db_host, db_port, service_name=db_name)
-        
-#         # สร้าง connection ด้วย cx_Oracle
-#         conn = cx_Oracle.connect(
-#             user=db_username,
-#             password=db_password,
-#             dsn=dsn
-#         )
-        
 #         cursor = conn.cursor()
-#         print(f"Connecting database {db_name} using cx_Oracle")
+#         print(f"Connecting database {db_name}")
 #         return cursor, conn
-        
-#     except cx_Oracle.Error as error:
+#     except oracledb.Error as error:
 #         message = f"เกิดข้อผิดพลาดในการเชื่อมต่อกับ Oracle DB : {error}"
-#         send_flex_notification_start(message)
 #         print("เกิดข้อผิดพลาดในการเชื่อมต่อกับ Oracle DB:", error)
 #         return message, None
+
+# Connect DB
+def ConOracle_TQMSALE():
+    try:
+        env = os.getenv('ENV', 'tqmsale_dev')
+        db_host = config.get(env, 'host_tqmsale')
+        db_port = config.get(env, 'port_tqmsale')
+        db_username = config.get(env, 'username_tqmsale')
+        db_password = config.get(env, 'password_tqmsale')
+        db_name = config.get(env, 'dbname_tqmsale')
+        
+        dsn_name = oracledb.makedsn(db_host, db_port, service_name=db_name)
+        conn = oracledb.connect(user=db_username, password=db_password, dsn=dsn_name)
+
+        cursor = conn.cursor()
+        print(f"Connecting database {db_name}")
+        return cursor, conn
+    except oracledb.Error as error:
+        message = f"เกิดข้อผิดพลาดในการเชื่อมต่อกับ Oracle DB : {error}"
+        print("เกิดข้อผิดพลาดในการเชื่อมต่อกับ Oracle DB:", error)
+        return message, None
 
 # Connect DB
 def ConOracle_TQMSALE():
@@ -152,7 +164,7 @@ def Check_Holiday(df):
 default_args = {
     "owner": "DCP",
     "depends_on_past": False,
-    "retries": 1,
+    "retries": 3,
     "retry_delay": timedelta(seconds=10)
 }
 
@@ -160,7 +172,7 @@ with DAG(
     dag_id="Topsale",
     default_args=default_args,
     catchup=False,
-    max_active_runs=1,
+    # max_active_runs=1,
     description="Topsale airflow",
     tags=["DCP"],
     # start_date=datetime(2024, 4, 24, 16, 30, 0, 0, tzinfo=local_tz),
