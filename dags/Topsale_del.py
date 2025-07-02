@@ -31,6 +31,7 @@ currentDate = currentDateAndTime.strftime("%Y-%m-%d")
 # yesterdatDate = currentDate - 1
 yesterdayDate = (currentDateAndTime - timedelta(days=1)).strftime("%Y-%m-%d")
 get_dates = config.get('variable', 'get_dates')
+get_gates_insert = config.get('variable', 'get_gates_insert')
 
 now = datetime.now(local_tz)
 # start_date = now.replace(hour=10, minute=0, second=0, microsecond=0, tzinfo=local_tz)
@@ -246,7 +247,7 @@ with DAG(
                         SELECT STAFFID, 
                                 TRUNC(CASE WHEN WORKDAY = 0 THEN NULL ELSE TARGET / WORKDAY END, 2) AS TGD
                         FROM XININSURE.SALETARGET
-                        WHERE PERIODID = TO_CHAR(SYSDATE, 'YYYYMM')
+                        WHERE PERIODID = TO_CHAR({get_gates_insert}, 'YYYYMM')
                         ),
                         RANKED_BY_GROUP AS (
                         SELECT 
@@ -376,7 +377,7 @@ with DAG(
                         SELECT STAFFID, 
                                 TRUNC(CASE WHEN WORKDAY = 0 THEN NULL ELSE TARGET / WORKDAY END, 2) AS TGD
                         FROM XININSURE.SALETARGET
-                        WHERE PERIODID = TO_CHAR(SYSDATE, 'YYYYMM')
+                        WHERE PERIODID = TO_CHAR({get_gates_insert}, 'YYYYMM')
                         ),
                         RANKED_BY_GROUP AS (
                         SELECT 
@@ -504,7 +505,7 @@ with DAG(
                                     SELECT STAFFID, 
                                             TRUNC(CASE WHEN WORKDAY = 0 THEN NULL ELSE TARGET / WORKDAY END, 2) AS TGD
                                     FROM XININSURE.SALETARGET
-                                    WHERE PERIODID = TO_CHAR(SYSDATE, 'YYYYMM')
+                                    WHERE PERIODID = TO_CHAR({get_gates_insert}, 'YYYYMM')
                                     ),
                                     RANKED_BY_GROUP AS (
                                     SELECT 
@@ -875,7 +876,7 @@ with DAG(
             # 3. ลบข้อมูล
             delete_query = "DELETE FROM TQMSALE.TOPSALE WHERE TEAM = 'MK'"
             cursor.execute(delete_query)
-            conn.commit()
+            # conn.commit()
             
             print("\nMK data deleted successfully")
             print(f"Total records deleted: {len(records_to_delete)}")
@@ -937,7 +938,7 @@ with DAG(
             # 3. ลบข้อมูล
             delete_query = "DELETE FROM TQMSALE.TOPSALE WHERE TEAM = 'MB'"
             cursor.execute(delete_query)
-            conn.commit()
+            # conn.commit()
             
             print("\nMB data deleted successfully")
             print(f"Total records deleted: {len(records_to_delete)}")
@@ -999,7 +1000,7 @@ with DAG(
             # 3. ลบข้อมูล
             delete_query = "DELETE FROM TQMSALE.TOPSALE WHERE TEAM = 'CS'"
             cursor.execute(delete_query)
-            conn.commit()
+            # conn.commit()
             
             print("\nCS data deleted successfully")
             print(f"Total records deleted: {len(records_to_delete)}")
