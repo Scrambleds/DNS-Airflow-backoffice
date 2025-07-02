@@ -32,6 +32,7 @@ yesterdayDate = (currentDateAndTime - timedelta(days=1)).strftime("%Y-%m-%d")
 get_dates = config.get('variable', 'get_dates')
 
 now = datetime.now(local_tz)
+# start_date = now.replace(hour=10, minute=0, second=0, microsecond=0, tzinfo=local_tz)
 start_date = now.replace(hour=8, minute=30, second=0, microsecond=0, tzinfo=local_tz)
 # ถ้าปัจจุบันยังไม่ถึง 8:30 น. ให้ใช้ 8:30 น. ของวันก่อนหน้า
 if now < start_date:
@@ -165,6 +166,7 @@ with DAG(
     # start_date=datetime(2024, 4, 24, 16, 30, 0, 0, tzinfo=local_tz),
     start_date=start_date,  # ใช้ start_date ที่คำนวณแล้ว
     schedule_interval="*/10 8-19 * * *",
+    # schedule_interval="*/10 8-19 * * *"
 ) as dag:
     
     @task.branch
