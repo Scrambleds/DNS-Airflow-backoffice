@@ -19,6 +19,7 @@ import logging
 from datetime import datetime
 import copy
 import time
+# import cx_Oracle
 
 config_file_path = 'config/Topsale.cfg'
 config = configparser.ConfigParser()
