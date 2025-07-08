@@ -1421,23 +1421,6 @@ with DAG(
             cursor.close()
             conn.close()
     
-    # @task
-    # def delete_MK():
-    #     cursor, conn = ConOracle_Oracle()
-    #     try:
-    #         query = "DELETE FROM TQMSALE.TOPSALE@TQMSALE WHERE TEAM = 'MK'"
-    #         cursor.execute(query)
-    #         conn.commit() 
-    #         print("MK data deleted successfully")
-    #         return {"delete_MK": "success"}
-    #     except oracledb.Error as error:
-    #         message = f'เกิดข้อผิดพลาด : {error}'
-    #         print(message)
-    #         return {"delete_MK": "error"}
-    #     finally:
-    #         cursor.close()
-    #         conn.close()
-    
     @task
     def delete_MK():
         cursor, conn = ConOracle_TQMSALE()
@@ -1482,23 +1465,6 @@ with DAG(
             cursor.close()
             conn.close()
 
-    # @task
-    # def delete_MB():
-    #     cursor, conn = ConOracle_Oracle()
-    #     try:
-    #         query = "DELETE FROM TQMSALE.TOPSALE@TQMSALE WHERE TEAM = 'MB'"
-    #         cursor.execute(query)
-    #         conn.commit() 
-    #         print("MB data deleted successfully")
-    #         return {"delete_MB": "success"}
-    #     except oracledb.Error as error:
-    #         message = f'เกิดข้อผิดพลาด : {error}'
-    #         print(message)
-    #         return {"delete_MB": "error"}
-    #     finally:
-    #         cursor.close()
-    #         conn.close()
-    
     @task
     def delete_MB():
         cursor, conn = ConOracle_TQMSALE()
@@ -1543,23 +1509,6 @@ with DAG(
         finally:
             cursor.close()
             conn.close()
-
-    # @task
-    # def delete_CS():
-    #     cursor, conn = ConOracle_Oracle()
-    #     try:
-    #         query = "DELETE FROM TQMSALE.TOPSALE@TQMSALE WHERE TEAM = 'CS'"
-    #         cursor.execute(query)
-    #         conn.commit()
-    #         print("CS data deleted successfully")
-    #         return {"delete_CS": "success"}
-    #     except oracledb.Error as error:
-    #         message = f'เกิดข้อผิดพลาด : {error}'
-    #         print(message)
-    #         return {"delete_CS": "error"}
-    #     finally:
-    #         cursor.close()
-    #         conn.close()
     
     @task
     def delete_CS():
