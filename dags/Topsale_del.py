@@ -168,7 +168,7 @@ with DAG(
     tags=["DCP"],
     # start_date=datetime(2024, 4, 24, 16, 30, 0, 0, tzinfo=local_tz),
     start_date=start_date,  # ใช้ start_date ที่คำนวณแล้ว
-    schedule_interval="*/10 8-19 * * *",
+    schedule_interval="*/50 8-19 * * *",
     # schedule_interval="*/10 8-19 * * *"
 ) as dag:
     
@@ -605,123 +605,92 @@ with DAG(
             # Query1: ดึงข้อมูลหลัก (เหมือนเดิมแต่ไม่มี PAIDAMOUNT และ TGD_PERCENT)
             query1 = f"""
                         WITH BASE AS
-                        (SELECT F.STAFFID,
-                            F.STAFFCODE,
-                            F.STAFFNAME,
-                            D.DEPARTMENTGROUPSUB,
-                            COUNT(*) AS TOTALSALE_MT,
-                            0 AS TOTALSALE_NONMT,
-                            COUNT(*) AS TOTALSALE,
-                            MAX(S.CREATEDATETIME) AS LASTESTSALE,
-                            SUM(S.NETAMOUNT + NVL(S.PRBAMOUNT, 0) + NVL(S.PRBVAT, 0) + NVL(S.PRBDUTY, 0)) AS TOTAL_MT,
-                            0 AS TOTAL_NONMT,
-                            SUM(S.NETAMOUNT + NVL(S.PRBAMOUNT, 0) + NVL(S.PRBVAT, 0) + NVL(S.PRBDUTY, 0)) AS TOTAL
-                        FROM XININSURE.SALE S
-                        JOIN XININSURE.STAFF F
-                        ON S.STAFFID = F.STAFFID
-                        JOIN XININSURE.DEPARTMENT D
-                        ON F.DEPARTMENTID = D.DEPARTMENTID
-                        JOIN XININSURE.PRODUCT P
-                        ON S.PRODUCTID = P.PRODUCTID
-                        WHERE S.SALEDATE >= TRUNC({get_dates2})
-                        AND S.SALEDATE < TRUNC(SYSDATE)
-                        AND S.SALESTATUS IN ('O','C')
-                        AND P.PRODUCTTYPE NOT IN ('LOAN', 'LOANX')
-                        AND D.DEPARTMENTGROUP LIKE 'MB%'
-                        AND ( D.DEPARTMENTGROUPSUB = 'MB_BASS'
-                        OR D.DEPARTMENTGROUPSUB = 'MB_LEK'
-                        OR D.DEPARTMENTGROUPSUB = 'MB_OHH'
-                        OR D.DEPARTMENTGROUPSUB = 'MB_OHM'
-                        OR D.DEPARTMENTGROUPSUB = 'MB_TON' )
-                        GROUP BY F.STAFFID,
-                            F.STAFFCODE,
-                            F.STAFFNAME,
-                            D.DEPARTMENTGROUPSUB
-                        ),
-                        HOLIDAY_DATA AS
-                        (SELECT (TRUNC({get_dates2}) - TRUNC({get_dates2}, 'MM') + 1) - COUNT(*)  AS DX,
-                            (LAST_DAY(TRUNC({get_dates2})) - TRUNC({get_dates2}, 'MM') + 1) - COUNT(*) AS DTOTAL
-                        FROM XININSURE.HOLIDAY
-                        WHERE TRUNC(HOLIDAYDATE) BETWEEN TRUNC({get_dates2}, 'MM') AND LAST_DAY({get_dates2})
-                        ),
-                        TGD_DATA AS
-                        (SELECT T.STAFFID,
-                            T.TARGET,
-                            HD.DX,
-                            HD.DTOTAL,
-                            TRUNC(
-                            CASE
-                            WHEN HD.DTOTAL = 0
-                            THEN NULL
-                            ELSE (HD.DX * T.TARGET / HD.DTOTAL)
-                            END, 2) AS TGD
-                        FROM XININSURE.SALETARGET T
-                        JOIN BASE B
-                        ON T.STAFFID = B.STAFFID
-                        CROSS JOIN HOLIDAY_DATA HD
-                        WHERE T.PERIODID = TO_CHAR({get_dates2}, 'YYYYMM')
+                        (
+                            SELECT 
+                                F.STAFFID,
+                                F.STAFFCODE,
+                                F.STAFFNAME,
+                                D.DEPARTMENTGROUPSUB,
+                                COUNT(*) AS TOTALSALE_MT,
+                                0 AS TOTALSALE_NONMT,
+                                COUNT(*) AS TOTALSALE,
+                                SUM(DECODE(SALESTATUS, 'O', S.NETAMOUNT + NVL(S.PRBAMOUNT, 0) + NVL(S.PRBVAT, 0) + NVL(S.PRBDUTY, 0), 
+                                                    'C', S.NETAMOUNT, 0)) AS SALEAMOUNT,
+                                MAX(S.CREATEDATETIME) AS LASTESTSALE,
+                                /* เปลี่ยน TOTAL_MT ให้ใช้สูตรเดียวกับ SALEAMOUNT */
+                                SUM(DECODE(SALESTATUS, 'O', S.NETAMOUNT + NVL(S.PRBAMOUNT, 0) + NVL(S.PRBVAT, 0) + NVL(S.PRBDUTY, 0), 
+                                                    'C', S.NETAMOUNT, 0)) AS TOTAL_MT,
+                                0 AS TOTAL_NONMT,
+                                SUM(S.NETAMOUNT + NVL(S.PRBAMOUNT, 0) + NVL(S.PRBVAT, 0) + NVL(S.PRBDUTY, 0)) AS TOTAL
+                            FROM XININSURE.SALE S
+                            JOIN XININSURE.STAFF F ON S.STAFFID = F.STAFFID
+                            JOIN XININSURE.DEPARTMENT D ON F.DEPARTMENTID = D.DEPARTMENTID
+                            JOIN XININSURE.PRODUCT P ON S.PRODUCTID = P.PRODUCTID
+                            WHERE 1=1
+                            AND S.SALEDATE = TRUNC(TO_DATE('09/05/2025', 'dd/mm/yyyy'))
+                            AND S.SALESTATUS IN ('O','C')
+                            AND P.PRODUCTTYPE NOT IN ('LOAN', 'LOANX')
+                            AND D.DEPARTMENTGROUP LIKE 'MB%'
+                            AND D.DEPARTMENTGROUPSUB IN ('MB_BASS', 'MB_LEK', 'MB_OHH', 'MB_OHM', 'MB_TON')
+                            GROUP BY 
+                                F.STAFFID,
+                                F.STAFFCODE,
+                                F.STAFFNAME,
+                                D.DEPARTMENTGROUPSUB
                         ),
                         RANKED_BY_GROUP AS
-                        (SELECT 'MB'           AS TEAM,
-                            B.DEPARTMENTGROUPSUB AS TEAMSUB,
-                            B.STAFFID,
-                            B.STAFFCODE,
-                            B.STAFFNAME,
-                            (SELECT DEPARTMENTCODE
-                            FROM XININSURE.DEPARTMENT
-                            WHERE DEPARTMENTID =
-                            (SELECT DEPARTMENTID FROM STAFF WHERE STAFFCODE = B.STAFFCODE
-                            )
-                            AND ROWNUM = 1
-                            ) AS DEPARTMENTCODE,
-                            B.TOTALSALE_MT,
-                            B.TOTALSALE_NONMT,
-                            B.TOTALSALE,
-                            B.LASTESTSALE,
-                            T.TGD,
-                            B.TOTAL_MT,
-                            B.TOTAL_NONMT,
-                            B.TOTAL,
-                            ROW_NUMBER() OVER (PARTITION BY B.DEPARTMENTGROUPSUB ORDER BY B.TOTAL DESC) AS SEQUENCE
-                        FROM BASE B
-                        LEFT JOIN TGD_DATA T
-                        ON B.STAFFID = T.STAFFID
+                        (
+                            SELECT 
+                                'MB' AS TEAM,
+                                B.DEPARTMENTGROUPSUB AS TEAMSUB,
+                                B.STAFFID,
+                                B.STAFFCODE,
+                                B.STAFFNAME,
+                                (SELECT DEPARTMENTCODE
+                                FROM XININSURE.DEPARTMENT
+                                WHERE DEPARTMENTID = (SELECT DEPARTMENTID FROM STAFF WHERE STAFFCODE = B.STAFFCODE)
+                                AND ROWNUM = 1
+                                ) AS DEPARTMENTCODE,
+                                B.TOTALSALE_MT,
+                                B.TOTALSALE_NONMT,
+                                B.TOTALSALE,
+                                B.LASTESTSALE,
+                                B.TOTAL_MT,
+                                B.TOTAL_NONMT,
+                                B.TOTAL,
+                                ROW_NUMBER() OVER (PARTITION BY B.DEPARTMENTGROUPSUB ORDER BY B.TOTAL DESC) AS SEQUENCE
+                            FROM BASE B
                         ),
                         RANKED_ALL_GROUP AS
-                        (SELECT 'MB' AS TEAM,
-                            'ALL MB'   AS TEAMSUB,
-                            B.STAFFID,
-                            B.STAFFCODE,
-                            B.STAFFNAME,
-                            (SELECT DEPARTMENTCODE
-                            FROM XININSURE.DEPARTMENT
-                            WHERE DEPARTMENTID =
-                            (SELECT DEPARTMENTID FROM STAFF WHERE STAFFCODE = B.STAFFCODE
-                            )
-                            AND ROWNUM = 1
-                            ) AS DEPARTMENTCODE,
-                            B.TOTALSALE_MT,
-                            B.TOTALSALE_NONMT,
-                            B.TOTALSALE,
-                            B.LASTESTSALE,
-                            T.TGD,
-                            B.TOTAL_MT,
-                            B.TOTAL_NONMT,
-                            B.TOTAL,
-                            ROW_NUMBER() OVER (ORDER BY B.TOTAL DESC) AS SEQUENCE
-                        FROM BASE B
-                        LEFT JOIN TGD_DATA T
-                        ON B.STAFFID = T.STAFFID
+                        (
+                            SELECT 
+                                'MB' AS TEAM,
+                                'ALL MB' AS TEAMSUB,
+                                B.STAFFID,
+                                B.STAFFCODE,
+                                B.STAFFNAME,
+                                (SELECT DEPARTMENTCODE
+                                FROM XININSURE.DEPARTMENT
+                                WHERE DEPARTMENTID = (SELECT DEPARTMENTID FROM STAFF WHERE STAFFCODE = B.STAFFCODE)
+                                AND ROWNUM = 1
+                                ) AS DEPARTMENTCODE,
+                                B.TOTALSALE_MT,
+                                B.TOTALSALE_NONMT,
+                                B.TOTALSALE,
+                                B.LASTESTSALE,
+                                B.TOTAL_MT,
+                                B.TOTAL_NONMT,
+                                B.TOTAL,
+                                ROW_NUMBER() OVER (ORDER BY B.TOTAL DESC) AS SEQUENCE
+                            FROM BASE B
                         )
                         SELECT *
-                        FROM
-                        (SELECT * FROM RANKED_BY_GROUP WHERE SEQUENCE <= 5
-                        UNION ALL
-                        SELECT * FROM RANKED_ALL_GROUP WHERE SEQUENCE <= 5
+                        FROM (
+                            SELECT * FROM RANKED_BY_GROUP WHERE SEQUENCE <= 5
+                            UNION ALL
+                            SELECT * FROM RANKED_ALL_GROUP WHERE SEQUENCE <= 5
                         )
-                        ORDER BY TEAMSUB,
-                        TOTAL_NONMT DESC,
-                        TOTAL DESC
+                        ORDER BY TEAMSUB, TOTAL_NONMT DESC, TOTAL DESC
             """
             
             cursor.execute(query1)
@@ -733,55 +702,115 @@ with DAG(
             # ดึง PAIDAMOUNT สำหรับแต่ละ STAFFID
             paid_amounts = []
             tgd_percents = []
+            tgd_values = []
             
             for staffid in df['STAFFID']:
                 query2 = f"""
-                --SELECT SUM((SS.NETAMOUNT + NVL(SS.PRBAMOUNT, 0) + NVL(SS.PRBVAT, 0) + NVL(SS.PRBDUTY, 0)) * DECODE(SS.PAYMENTSTATUS, 'Y', 1, 'P', 1, 0)) AS PAIDAMOUNT
-                --FROM XININSURE.SALE SS
-                --JOIN XININSURE.PRODUCT PP ON SS.PRODUCTID = PP.PRODUCTID
-                --WHERE SS.STAFFID = :staffid
-                --AND SS.SALEDATE >= TRUNC({get_dates2}, 'MM')
-                --AND SS.SALEDATE < TRUNC(SYSDATE)
-                --AND SS.SALESTATUS IN ('O','C')
-                --AND PP.PRODUCTTYPE NOT IN ('LOAN', 'LOANX')
-                
-                SELECT SUM((SS.NETAMOUNT + NVL(SS.PRBAMOUNT, 0) + NVL(SS.PRBVAT, 0) + NVL(SS.PRBDUTY, 0)) * DECODE(SS.PAYMENTSTATUS, 'Y', 1, 'P', 1, 0)) AS PAIDAMOUNT
-                FROM XININSURE.SALE SS
-                JOIN XININSURE.PRODUCT PP
-                ON SS.PRODUCTID = PP.PRODUCTID
-                WHERE SS.STAFFID = :staffid
-                AND SS.SALEDATE >= TRUNC({get_dates2}, 'MM')
-                AND SS.SALEDATE < TRUNC(SYSDATE)
-                AND SS.SALESTATUS IN ('O','C')
-                AND PP.PRODUCTTYPE NOT IN ('LOAN', 'LOANX')
+                            WITH HOLIDAY_DATA AS (
+                            SELECT
+                                HDA.DX,
+                                HDB.DTOTAL
+                            FROM
+                                (
+                                SELECT
+                                    (TO_DATE('09/05/2025', 'dd/mm/yyyy') - TRUNC(TO_DATE('09/05/2025', 'dd/mm/yyyy'), 'MM') + 1) - COUNT(*) AS DX
+                                FROM
+                                    XININSURE.HOLIDAY
+                                WHERE
+                                    TRUNC(HOLIDAYDATE) BETWEEN TRUNC(TO_DATE('09/05/2025', 'dd/mm/yyyy'), 'MM') AND TO_DATE('09/05/2025', 'dd/mm/yyyy')
+                                ) HDA
+                            CROSS JOIN
+                                (
+                                SELECT
+                                    (LAST_DAY(TO_DATE('09/05/2025', 'dd/mm/yyyy')) - TRUNC(TO_DATE('09/05/2025', 'dd/mm/yyyy'), 'MM') + 1) - COUNT(*) AS DTOTAL
+                                FROM
+                                    XININSURE.HOLIDAY
+                                WHERE
+                                    TRUNC(HOLIDAYDATE) BETWEEN TRUNC(TO_DATE('09/05/2025', 'dd/mm/yyyy'), 'MM') AND LAST_DAY(TO_DATE('09/05/2025', 'dd/mm/yyyy'))
+                                    ) HDB
+                            )
+                            SELECT
+                                C.STAFFID,
+                                C.PAIDAMOUNT,
+                                C.TARGET,
+                                C.TGD,
+                                TRUNC((C.PAIDAMOUNT / C.TGD) * 100, 2) AS TGD_PERCENT
+                            FROM
+                                (
+                                SELECT
+                                    B.*,
+                                    TRUNC(((B.TARGET / HD.DTOTAL) * HD.DX), 2) AS TGD
+                                FROM
+                                    (
+                                    SELECT
+                                        A.*,
+                                        (
+                                        SELECT
+                                            TARGET
+                                        FROM
+                                            XININSURE.SALETARGET
+                                        WHERE
+                                            STAFFID = A.STAFFID
+                                            AND PERIODID = A.PERIODID
+                                            ) AS TARGET
+                                    FROM
+                                        (
+                                        SELECT
+                                            MAX(SS.STAFFID) AS STAFFID,
+                                            TO_CHAR(MAX(SS.SALEDATE), 'YYYYMM') AS PERIODID,
+                                            SUM((SS.NETAMOUNT + NVL(SS.PRBAMOUNT, 0) + NVL(SS.PRBVAT, 0) + NVL(SS.PRBDUTY, 0)) * DECODE(SS.PAYMENTSTATUS, 'Y', 1, 'P', 1, 0)) AS PAIDAMOUNT
+                                        FROM
+                                            XININSURE.SALE SS
+                                        JOIN XININSURE.PRODUCT PP
+                            ON
+                                            SS.PRODUCTID = PP.PRODUCTID
+                                        WHERE
+                                            SS.STAFFID = :STAFFID
+                                            AND SS.SALEDATE >= TRUNC(TO_DATE('01/05/2025', 'DD/MM/YYYY'), 'MM')
+                                                AND SS.SALEDATE < TRUNC(TO_DATE('09/05/2025', 'DD/MM/YYYY') + 1)
+                                                    AND SS.SALESTATUS IN ('O', 'C')
+                                                GROUP BY
+                                                    SS.STAFFID,
+                                                    TO_CHAR(SS.SALEDATE, 'YYYYMM')
+                                    ) A
+                                ) B
+                                CROSS JOIN HOLIDAY_DATA HD
+                            ) C
                 """
                 
                 cursor.execute(query2, {'staffid': staffid})
-                paid_amount = cursor.fetchone()[0] or 0
-                paid_amounts.append(paid_amount)
+                result = cursor.fetchone()
                 
-                # คำนวณ TGD_PERCENT
-                tgd = df.loc[df['STAFFID'] == staffid, 'TGD'].values[0]
-                tgd_percent = (paid_amount / tgd) * 100 if tgd and tgd != 0 else 0
-                tgd_percents.append(round(tgd_percent, 2))
+                # กำหนดค่าเริ่มต้น
+                paid_amount = 0
+                tgd = 0
+                tgd_percent = 0
+                
+                if result:
+                    paid_amount = result[1] if result[1] is not None else 0
+                    tgd = result[3] if result[3] is not None else 0
+                    tgd_percent = result[4] if result[4] is not None else 0
+                
+                paid_amounts.append(paid_amount)
+                tgd_values.append(tgd)
+                tgd_percents.append(tgd_percent)
             
-            # เพิ่มคอลัมน์ PAIDAMOUNT และ TGD_PERCENT ใน DataFrame
+            # เพิ่มคอลัมน์ใหม่
             df['PAIDAMOUNT'] = paid_amounts
+            df['TGD'] = tgd_values
             df['TGD_PERCENT'] = tgd_percents
             
-            formatted_table = df.to_markdown(index=False)
-            print(f"\n{formatted_table}")
-            print(f"Select data successfully")
-            print(f"Total records: {len(df)}")
+            print(f"\n{df.to_markdown(index=False)}")
+            print(f"Selected {len(df)} records successfully")
             
             conn.commit() 
             return {"select_MB": df}
             
-        except oracledb.Error as error:
+        except Exception as error:
             conn.rollback()  
-            message = f'เกิดข้อผิดพลาด : {error}'
-            print(message)
-            return {"select_MB": pd.DataFrame(), "message": message}
+            error_msg = f'Error in select_MB: {str(error)}'
+            print(error_msg)
+            return {"select_MB": pd.DataFrame(), "error": error_msg}
         finally:
             cursor.close()
             conn.close()
@@ -815,7 +844,10 @@ with DAG(
                                     FROM XININSURE.SALE S
                                     JOIN XININSURE.STAFF F ON S.STAFFID = F.STAFFID
                                     JOIN XININSURE.DEPARTMENT D ON S.STAFFDEPARTMENTID = D.DEPARTMENTID
-                                    WHERE {get_dates}
+                                    WHERE
+                                    S.SALEDATE = to_date('09/05/2025', 'dd/mm/yyyy')   
+                                    --S.SALEDATE >= TRUNC({get_dates2})
+                                    --AND S.SALEDATE < TRUNC(SYSDATE-60)
                                         AND S.SALESTATUS IN ('O')
                                         AND D.DEPARTMENTGROUP LIKE 'CS%'
                                     GROUP BY F.STAFFID, F.STAFFCODE, F.STAFFNAME, D.ANALYSISCODE
@@ -824,7 +856,7 @@ with DAG(
                                     SELECT STAFFID, 
                                             TRUNC(CASE WHEN WORKDAY = 0 THEN NULL ELSE TARGET / WORKDAY END, 2) AS TGD
                                     FROM XININSURE.SALETARGET
-                                    WHERE PERIODID = TO_CHAR({get_dates_insert}, 'YYYYMM')
+                                    WHERE PERIODID = TO_CHAR(to_date('09/05/2025', 'dd/mm/yyyy'), 'YYYYMM')
                                     ),
                                     RANKED_BY_GROUP AS (
                                     SELECT 
@@ -982,7 +1014,7 @@ with DAG(
         try:
             # Query1: ดึงข้อมูลหลัก (เหมือนเดิมแต่ไม่มี PAIDAMOUNT และ TGD_PERCENT)
             query1 = f"""
-                        WITH BASE AS
+             WITH BASE AS
                         (SELECT F.STAFFID,
                             F.STAFFCODE,
                             F.STAFFNAME,
@@ -990,6 +1022,7 @@ with DAG(
                             COUNT(*) AS TOTALSALE_MT,
                             0 AS TOTALSALE_NONMT,
                             COUNT(*) AS TOTALSALE,
+                            SUM( DECODE( SALESTATUS, 'O', S.NETAMOUNT + NVL ( S.PRBAMOUNT, 0 ) + NVL ( S.PRBVAT, 0 ) + NVL ( S.PRBDUTY, 0 ), 'C', S.NETAMOUNT, 0 )) AS SALEAMOUNT,
                             MAX(S.CREATEDATETIME) AS LASTESTSALE,
                             SUM(S.NETAMOUNT + NVL(S.PRBAMOUNT, 0) + NVL(S.PRBVAT, 0) + NVL(S.PRBDUTY, 0)) AS TOTAL_MT,
                             0 AS TOTAL_NONMT,
@@ -1001,8 +1034,8 @@ with DAG(
                         ON F.DEPARTMENTID = D.DEPARTMENTID
                         JOIN XININSURE.PRODUCT P
                         ON S.PRODUCTID = P.PRODUCTID
-                        WHERE S.SALEDATE >= {get_dates2}
-                        AND S.SALEDATE < TRUNC(SYSDATE)
+                        WHERE 1=1 
+                        AND S.SALEDATE = TO_DATE('09/05/2025', 'dd/mm/yyyy')
                         AND S.SALESTATUS IN ('O','C')
                         AND P.PRODUCTTYPE NOT IN ('LOAN', 'LOANX')
                         AND D.DEPARTMENTGROUP LIKE 'MK%'
@@ -1014,29 +1047,6 @@ with DAG(
                             F.STAFFCODE,
                             F.STAFFNAME,
                             D.ANALYSISCODE
-                        ),
-                        HOLIDAY_DATA AS
-                        (SELECT (TRUNC({get_dates2}) - TRUNC({get_dates2}, 'MM') + 1) - COUNT(*)  AS DX,
-                            (LAST_DAY(TRUNC({get_dates2})) - TRUNC({get_dates2}, 'MM') + 1) - COUNT(*) AS DTOTAL
-                        FROM XININSURE.HOLIDAY
-                        WHERE TRUNC(HOLIDAYDATE) BETWEEN TRUNC({get_dates2}, 'MM') AND LAST_DAY({get_dates2})
-                        ),
-                        TGD_DATA AS
-                        (SELECT T.STAFFID,
-                            T.TARGET,
-                            HD.DX,
-                            HD.DTOTAL,
-                            TRUNC(
-                            CASE
-                            WHEN HD.DTOTAL = 0
-                            THEN NULL
-                            ELSE (HD.DX * T.TARGET / HD.DTOTAL)
-                            END, 2) AS TGD
-                        FROM XININSURE.SALETARGET T
-                        JOIN BASE B
-                        ON T.STAFFID = B.STAFFID
-                        CROSS JOIN HOLIDAY_DATA HD
-                        WHERE T.PERIODID = TO_CHAR({get_dates2}, 'YYYYMM')
                         ),
                         RANKED_BY_GROUP AS
                         (SELECT 'MK' AS TEAM,
@@ -1055,14 +1065,11 @@ with DAG(
                             B.TOTALSALE_NONMT,
                             B.TOTALSALE,
                             B.LASTESTSALE,
-                            T.TGD,
                             B.TOTAL_MT,
                             B.TOTAL_NONMT,
                             B.TOTAL,
                             ROW_NUMBER() OVER (PARTITION BY B.ANALYSISCODE ORDER BY B.TOTAL DESC) AS SEQUENCE
                         FROM BASE B
-                        LEFT JOIN TGD_DATA T
-                        ON B.STAFFID = T.STAFFID
                         ),
                         RANKED_ALL_GROUP AS
                         (SELECT 'MK' AS TEAM,
@@ -1081,14 +1088,11 @@ with DAG(
                             B.TOTALSALE_NONMT,
                             B.TOTALSALE,
                             B.LASTESTSALE,
-                            T.TGD,
                             B.TOTAL_MT,
                             B.TOTAL_NONMT,
                             B.TOTAL,
                             ROW_NUMBER() OVER (ORDER BY B.TOTAL DESC) AS SEQUENCE
                         FROM BASE B
-                        LEFT JOIN TGD_DATA T
-                        ON B.STAFFID = T.STAFFID
                         )
                         SELECT *
                         FROM
@@ -1096,6 +1100,7 @@ with DAG(
                         UNION ALL
                         SELECT * FROM RANKED_ALL_GROUP WHERE SEQUENCE <= 5
                         )
+                        
                         ORDER BY TEAMSUB,
                         TOTAL_NONMT DESC,
                         TOTAL DESC
@@ -1110,31 +1115,77 @@ with DAG(
             # ดึง PAIDAMOUNT สำหรับแต่ละ STAFFID
             paid_amounts = []
             tgd_percents = []
+            tgd_values = []
             
             for staffid in df['STAFFID']:
                 query2 = f"""
-                SELECT SUM((SS.NETAMOUNT + NVL(SS.PRBAMOUNT, 0) + NVL(SS.PRBVAT, 0) + NVL(SS.PRBDUTY, 0)) 
-                    * DECODE(SS.PAYMENTSTATUS, 'Y', 1, 'P', 1, 0)) AS PAIDAMOUNT
-                FROM XININSURE.SALE SS
-                JOIN XININSURE.PRODUCT PP ON SS.PRODUCTID = PP.PRODUCTID
-                WHERE SS.STAFFID = :staffid
-                AND SS.SALEDATE >= TRUNC({get_dates2}, 'MM')
-                AND SS.SALEDATE < TRUNC(SYSDATE)
-                AND SS.SALESTATUS IN ('O','C')
-                AND PP.PRODUCTTYPE NOT IN ('LOAN', 'LOANX')
+                         WITH HOLIDAY_DATA AS (
+                            SELECT HDA.DX,
+                                HDB.DTOTAL
+                            FROM
+                                (SELECT (TO_DATE('09/05/2025', 'dd/mm/yyyy') - TRUNC(TO_DATE('09/05/2025', 'dd/mm/yyyy'), 'MM') + 1) - COUNT(*) AS DX
+                                FROM XININSURE.HOLIDAY
+                                WHERE TRUNC(HOLIDAYDATE) BETWEEN TRUNC(TO_DATE('09/05/2025', 'dd/mm/yyyy'), 'MM') AND TO_DATE('09/05/2025', 'dd/mm/yyyy')
+                                ) HDA
+                            CROSS JOIN
+                                (SELECT (LAST_DAY(TO_DATE('09/05/2025', 'dd/mm/yyyy')) - TRUNC(TO_DATE('09/05/2025', 'dd/mm/yyyy'), 'MM') + 1) - COUNT(*) AS DTOTAL
+                                FROM XININSURE.HOLIDAY
+                                WHERE TRUNC(HOLIDAYDATE) BETWEEN TRUNC(TO_DATE('09/05/2025', 'dd/mm/yyyy'), 'MM') AND LAST_DAY(TO_DATE('09/05/2025', 'dd/mm/yyyy'))
+                                ) HDB
+                        )
+                        SELECT C.STAFFID,
+                            C.PAIDAMOUNT,
+                            C.TARGET,
+                            C.TGD,
+                            TRUNC((C.PAIDAMOUNT / C.TGD) * 100, 2) AS TGD_PERCENT
+                        FROM
+                            (SELECT B.*,
+                                    TRUNC(((B.TARGET / HD.DTOTAL) * HD.DX), 2) AS TGD
+                            FROM
+                                (SELECT A.*,
+                                        (SELECT TARGET
+                                        FROM XININSURE.SALETARGET
+                                        WHERE STAFFID = A.STAFFID
+                                        AND PERIODID = A.PERIODID
+                                        ) AS TARGET
+                                FROM
+                                    (SELECT MAX(SS.STAFFID) AS STAFFID,
+                                            TO_CHAR(MAX(SS.SALEDATE), 'YYYYMM') AS PERIODID,
+                                            SUM((SS.NETAMOUNT + NVL(SS.PRBAMOUNT, 0) + NVL(SS.PRBVAT, 0) + NVL(SS.PRBDUTY, 0)) * DECODE(SS.PAYMENTSTATUS, 'Y', 1, 'P', 1, 0)) AS PAIDAMOUNT
+                                    FROM XININSURE.SALE SS
+                                    JOIN XININSURE.PRODUCT PP
+                                    ON SS.PRODUCTID = PP.PRODUCTID
+                                    WHERE SS.STAFFID = :STAFFID
+                                    AND SS.SALEDATE >= TRUNC(TO_DATE('01/05/2025', 'DD/MM/YYYY'), 'MM')
+                                    AND SS.SALEDATE < TRUNC(TO_DATE('09/05/2025', 'DD/MM/YYYY') + 1)
+                                    AND SS.SALESTATUS IN ('O','C')
+                                    GROUP BY SS.STAFFID, TO_CHAR(SS.SALEDATE, 'YYYYMM')
+                                    ) A
+                                ) B
+                            CROSS JOIN HOLIDAY_DATA HD
+                            ) C
                 """
                 
                 cursor.execute(query2, {'staffid': staffid})
-                paid_amount = cursor.fetchone()[0] or 0
-                paid_amounts.append(paid_amount)
+                result = cursor.fetchone()
                 
-                # คำนวณ TGD_PERCENT
-                tgd = df.loc[df['STAFFID'] == staffid, 'TGD'].values[0]
-                tgd_percent = (paid_amount / tgd) * 100 if tgd and tgd != 0 else 0
-                tgd_percents.append(round(tgd_percent, 2))
+                # กำหนดค่าเริ่มต้น
+                paid_amount = 0
+                tgd = 0
+                tgd_percent = 0
+                
+                if result:
+                    paid_amount = result[1] if result[1] is not None else 0
+                    tgd = result[3] if result[3] is not None else 0
+                    tgd_percent = result[4] if result[4] is not None else 0
+                
+                paid_amounts.append(paid_amount)
+                tgd_values.append(tgd)
+                tgd_percents.append(tgd_percent)
             
-            # เพิ่มคอลัมน์ PAIDAMOUNT และ TGD_PERCENT ใน DataFrame
+            # เพิ่มคอลัมน์ใหม่
             df['PAIDAMOUNT'] = paid_amounts
+            df['TGD'] = tgd_values
             df['TGD_PERCENT'] = tgd_percents
             
             formatted_table = df.to_markdown(index=False)
