@@ -313,7 +313,9 @@ with DAG(
             df = pd.DataFrame(
                 cursor.fetchall(), columns=[desc[0] for desc in cursor.description]
             )
+            formatted_table = df.to_markdown(index=False)
             # print(query)
+            print(f"\n{formatted_table}")
             print(f"Get data successfully")
             print(f"df: {len(df)}")
             
