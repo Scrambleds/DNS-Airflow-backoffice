@@ -28,10 +28,8 @@ local = config.get("variable","tz")
 local_tz = pendulum.timezone(local)
 currentDateAndTime = datetime.now(tz=local_tz)
 currentDate = currentDateAndTime.strftime("%Y-%m-%d")
-# yesterdatDate = currentDate - 1
-yesterdayDate = (currentDateAndTime - timedelta(days=1)).strftime("%Y-%m-%d")
 
-def ConOracle_Oracle():
+def ConOracle():
     try:
         env = os.getenv('ENV', 'xininsure_dev')
         db_host = config.get(env, 'host_xininsure')
@@ -52,7 +50,7 @@ def ConOracle_Oracle():
         return message, None
 
 def Get_Holidays():
-    cursor, conn = ConOracle_Oracle()
+    cursor, conn = ConOracle()
     try:
         cursor.execute(
             """
@@ -91,7 +89,7 @@ def Check_Holiday(df):
     except Exception as e:
         print(f"Check Holiday error: {e}")
         raise e
-            
+    
 # Default arguments
 default_args = {
     "owner": "DCP",
@@ -134,8 +132,198 @@ with DAG(
             message = f"Fail with task {task_id} \n error : {e}"
             print(f"check_holiday : {e}")
         finally:
-            print(f"{message}")    
-
+            print(f"{message}")
+            
+    @task
+    def Get_cancelled_work():
+        cursor, conn = ConOracle()
+        try:
+            query = f"""SELECT
+                        S.SALEID,
+                        xininsure.getbookname(s.periodid,
+                        s.salebookcode,
+                        s.sequence) AS bookname,
+                        s.routeid ,
+                        r.routecode,
+                        s.paidamount,
+                        s.cancelresultid,
+                        (
+                        SELECT
+                            SB.BYTECODE
+                        FROM
+                            XININSURE.SYSBYTEDES SB
+                        WHERE
+                            SB.COLUMNNAME = 'PAYMENTSTATUS'
+            AND SB.TABLENAME = 'SALE'
+                AND SB.BYTECODE = S.PAYMENTSTATUS) AS PAYMENTSTATUS,
+            S.PAYMENTMODE,
+            F.STAFFCODE || ':' || F.STAFFNAME AS STAFFNAME,
+            D.DEPARTMENTID,
+            D.DEPARTMENTCODE || ':' || D.DEPARTMENTNAME AS DEPARTMENTNAME,
+            D.DEPARTMENTCODE,
+            ssa.actionid,
+            ssa.actioncode,
+            ssa.actionstatus,
+            (
+            SELECT
+                r.PROVINCECODE
+            FROM
+                XININSURE.ROUTE r
+            WHERE
+                s.ROUTEID = r.ROUTEID) AS PROVINCECODE,
+            ssa.RESULTID,
+            (
+            SELECT
+                r.RESULTCODE
+            FROM
+                XININSURE.RESULT r
+            WHERE
+                r.RESULTID = ssa.RESULTID) AS RESULTCODE,
+            S.MASTERSALEID,
+            ssa.duedate,
+            (SELECT MAX(r.SAVEDATE ) 
+                FROM XININSURE.RECEIVEITEMCLEAR T , 
+                        xininsure.receiveitem i,
+                        xininsure.receive    r              
+                WHERE  t.receiveid = i.receiveid
+                and    t.receiveitem = i.receiveitem
+                and    i.receiveid = r.receiveid
+                and    r.receivestatus in ('S','C')
+            and    i.receivebookcode not  in('R01','R03','R02','R04')
+                and   T.SALEID = SSA.SALEID   )  AS LASTUPDATEDATETIME,
+            (
+            SELECT
+                max(rc.installment)
+                -- ชำระล่าสุดงวดที่
+            FROM
+                xininsure.receiveitem ri,
+                xininsure.receiveitemclear rc
+            WHERE
+                ri.receiveid = rc.receiveid
+                AND rc.receiveitem = rc.receiveitem
+                AND ri.saleid = S.SALEID) AS LASTINSTALLMENT,
+            (
+            SELECT
+                max(sa.installment)
+                ---  งานที่ตามอยู่
+            FROM
+                xininsure.saleaction sa
+            WHERE
+                sa.actionid = ssa.actionid
+                AND sa.actionstatus = 'W'
+            AND sa.saleid = S.SALEID
+            AND sa.sequence = (
+            SELECT
+                max(sa.sequence)
+            FROM
+                xininsure.saleaction sa
+            WHERE
+                sa.actionid = ssa.actionid
+                AND sa.actionstatus = 'W'
+                        AND sa.saleid = S.SALEID)) AS FOLLOWINSTALLMENT,
+                        su.SUPPLIERCODE,
+            NVL(
+                    (
+                    SELECT
+                        s.BALANCE
+                    FROM
+                        xininsure.salepayment s
+                    WHERE
+                        s.saleid = ssa.saleid
+                        AND s.balance > 0
+                        AND s.installment = (
+                            SELECT
+                                sa.installment
+                            FROM
+                                xininsure.saleaction sa
+                            WHERE
+                                sa.saleid = ssa.saleid
+                                AND sa.actionid = 44
+                                -- C01
+                AND sa.actionstatus = 'W'
+                AND sa.sequence = (
+                    SELECT
+                        max(sa.sequence)
+                    FROM
+                        xininsure.saleaction sa
+                    WHERE
+                        sa.saleid = ssa.saleid
+                        AND sa.actionid = 44
+                        -- C01
+                        AND sa.actionstatus = 'W'
+                                )
+                        )
+                    ),
+                    0
+                )AS balance,
+                PT.PRODUCTGROUP
+            FROM
+                XININSURE.SALE S,
+                XININSURE.STAFF F,
+                XININSURE.DEPARTMENT D,
+                XININSURE.PRODUCT P,
+                XININSURE.PRODUCTTYPE PT,
+                XININSURE.SUPPLIER SU,
+                XININSURE.ROUTE R,
+                (
+                SELECT
+                    SA.SALEID ,
+                    SA.INSTALLMENT,
+                    a.actionid,
+                    a.actioncode ,
+                    sa.actionstatus,
+                    sa.RESULTID,
+                    sa.duedate
+                    FROM
+                    XININSURE.SALEACTION SA,
+                    xininsure.action a
+                WHERE
+                    SA.ACTIONID IN(3760, 3761, 2261, 3740, 3741, 3742, 3743,
+                    5933, 11293, 7533, 9133, 9174, 11574, 11575, 11576, 
+                    11577, 11553, 11554, 11555, 15014)
+                        AND sa.actionid = a.actionid
+                        --ดำเนินการแล้ว
+                        AND SA.ACTIONSTATUS IN ('R', 'W', 'Y')
+            --    AND SA.DUEDATE = TRUNC(SYSDATE) 
+                AND SA.DUEDATE >= TO_DATE('20/07/2024', 'DD/MM/YYYY')
+                AND SA.DUEDATE <= TO_DATE('30/07/2024', 'DD/MM/YYYY')
+                --AND    SA.DUEDATE <= TRUNC(SYSDATE) - 1
+                --AND sa.duedate >= to_date('07/05/2025', 'dd/mm/yyyy')
+                --AND sa.duedate <= to_date('10/05/2020', 'dd/mm/yyyy') 
+                                ) SSA
+            WHERE
+                S.SALEID = SSA.SALEID
+                AND S.STAFFID = F.STAFFID
+                AND S.STAFFDEPARTMENTID = D.DEPARTMENTID
+                AND S.ROUTEID = R.ROUTEID
+                AND S.PRODUCTID = P.PRODUCTID
+                AND P.SUPPLIERID = SU.SUPPLIERID
+                AND P.PRODUCTTYPE = PT.PRODUCTTYPE
+            --    AND PT.PRODUCTGROUP = 'MT'
+                AND SU.SUPPLIERCODE IN ('KWIL','AIA','SSL','BKI','BLA','VY','DHP','TVI','MTI','MTL','MLI','ALIFE','FWD','KTAL','ACE','SELIC','PLA','TSLI')
+                --อนุมัติ
+                AND S.PLATEID IS NULL
+                AND S.CANCELDATE IS NULL
+                AND S.CANCELEFFECTIVEDATE IS NULL
+            ORDER BY
+                s.SALEID DESC """
+            
+            print("Fetching data...")
+            cursor.execute(query)
+            df = pd.DataFrame(
+                cursor.fetchall(), columns=[desc[0] for desc in cursor.description]
+            )
+            # print(query)
+            print(f"Get data successfully")
+            print(f"df: {len(df)}")
+            
+            return df
+        except oracledb.Error as e:
+            print(f"Get_Data : {e}")
+            
+        finally:
+            cursor.close()
+            conn.close()           
 
     #Dummy
     start = EmptyOperator(task_id="start_dag", trigger_rule="none_failed_min_one_success")
@@ -146,10 +334,11 @@ with DAG(
     join_v = EmptyOperator(task_id="join_v_branch", trigger_rule="none_failed_min_one_success")
     execute_x = EmptyOperator(task_id="execute_x_path", trigger_rule="none_failed_min_one_success")
     execute_v = EmptyOperator(task_id="execute_v_path", trigger_rule="none_failed_min_one_success")
-    get_cancellation_work = EmptyOperator(task_id="get_cancellation_work", trigger_rule="none_failed_min_one_success")
+    # get_cancellation_work = EmptyOperator(task_id="get_cancellation_work", trigger_rule="none_failed_min_one_success")
     
     #task ที่ไป call function
     check_holiday_task = check_holiday()
+    get_cancellation_work = Get_cancelled_work()
     
     #กำหนด workflow
     (
