@@ -317,7 +317,8 @@ with DAG(
             print(f"Get data successfully")
             print(f"df: {len(df)}")
             
-            return df
+            return { 'df_cancel_work': df }
+        
         except oracledb.Error as e:
             print(f"Get_Data : {e}")
             
