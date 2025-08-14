@@ -7,6 +7,7 @@ from datetime import datetime, timezone, timedelta
 import pandas as pd
 import numpy as np
 import oracledb
+import json
 from pythainlp.util import thai_strftime
 from airflow.utils.dates import days_ago
 import requests
@@ -28,6 +29,9 @@ local = config.get("variable","tz")
 local_tz = pendulum.timezone(local)
 currentDateAndTime = datetime.now(tz=local_tz)
 currentDate = currentDateAndTime.strftime("%Y-%m-%d")
+
+cmtel_config_str = config.get("variable", "CMTEL_config")
+cmt21_config_str = config.get("variable", "CMT21_config")
 
 def ConOracle():
     try:
@@ -73,6 +77,30 @@ def Get_Holidays():
         cursor.close()
         conn.close()
 
+def Get_Actions():
+    cursor, conn = ConOracle()
+    try:
+        cursor.execute(
+            """
+                SELECT * FROM XININSURE."ACTION" a
+                ORDER BY a.ACTIONID
+            """
+        )
+        df = pd.DataFrame(
+            cursor.fetchall(), columns=[desc[0] for desc in cursor.description]
+        )
+        print(df)
+        formatted_table = df.to_markdown(index=False)
+        print(f"\n{formatted_table}")
+        print(f"Get data successfully")
+        return df
+    except oracledb.Error as e:
+        print(f"Get_Actions : {e}")
+        return None
+    finally:
+        cursor.close()
+        conn.close()
+
 def Check_Holiday(df):
     try:
         holiday_dates = df["HOLIDAYDATE"].dt.strftime("%Y-%m-%d")
@@ -89,6 +117,66 @@ def Check_Holiday(df):
     except Exception as e:
         print(f"Check Holiday error: {e}")
         raise e
+    
+def Check_action_code(row, df_actionData):
+    def check_CMT21(staffCode, cmt21_config):
+        team_mapping = {
+            'team_g': 'CMT 16 G', 'team_d': 'CMT 16 D', 'team_m': 'CMT 16 M',
+            'team_e': 'CMT 16 E', 'team_k': 'CMT 16 K', 'team_b': 'CMT 16 B',
+            'team_f': 'CMT 16 F', 'team_j': 'CMT 16 J', 'team_c': 'CMT 16 C',
+            'team_i': 'CMT 16 I', 'team_n': 'CMT 16 N', 'team_h': 'CMT 16 H'
+        }
+
+        for team, code in team_mapping.items():
+            if staffCode in cmt21_config.get(team, []):
+                return code
+        return 'MK02' # else case if no team matches
+    
+    def check_CMTEL(staffCode, cmtel_config):
+        code = ''
+        if staffCode in cmtel_config.get("team_a", []):
+            code = 'ESY01A'
+        elif staffCode in cmtel_config.get("team_b", []):
+            code = 'ESY01B'
+        return code
+    
+    try:
+        cmtel_config = json.loads(cmtel_config_str)
+        cmt21_config = json.loads(cmt21_config_str)
+
+        df_actionData = Get_Actions()
+        actionCode = row["ACTIONCODE"]
+        staffCode = row["STAFFCODE"]
+        code = ""
+
+        if actionCode == "CMTEL":
+            code = check_CMTEL(staffCode, cmtel_config)
+        elif actionCode == "CMT21":
+            code = check_CMT21(staffCode, cmt21_config)
+        elif actionCode in ["CMT34","CMT34.01","CMT35", "CMT35.01"]:
+            code = 'ZDL01'
+        elif actionCode in ["CMT32", "CMT32.01", "CMT33"]:
+            region = row["REGION"]
+            if region in ['N']:
+                code = 'ZBR01'
+            elif region in ['BKK', 'MX', 'MU', 'ML']:
+                code = 'ZBR02'
+            elif region in ['NL', 'NU']:
+                code = 'ZBR03'
+            elif region in ['S']:
+                code = 'ZBR04'
+        
+        if code:
+            result = df_actionData.query("actioncode == @code")["ACTIONID"]
+            if not result.empty:
+                return result.iloc[0]
+        return None
+
+    except Exception as e:
+        print(f"Check action code error: {e}")
+        raise e
+
+
     
 # Default arguments
 default_args = {
@@ -327,6 +415,64 @@ with DAG(
         finally:
             cursor.close()
             conn.close()           
+    
+
+    @task
+    def Set_action_code(**kwargs):
+        ti = kwargs["ti"]
+        result = ti.xcom_pull(task_ids="Get_cancelled_work", key="return_value")
+
+        df = result.get("df_cancel_work", pd.DataFrame())
+        cursor, conn = ConOracle()
+        
+        df_actionData = Get_Actions()
+        if df_actionData is None or df_actionData.empty:
+            print("Failed to get action data.")
+            cursor.close()
+            conn.close()
+            return None
+
+        sql = """
+                INSERT INTO XININSURE.SALEACTION(SALEID, SEQUENCE, ACTIONID, ACTIONSTATUS, DUEDATE, REQUESTREMARK)
+                SELECT S.SALEID,
+                    NVL((SELECT MAX(SEQUENCE) FROM XININSURE.SALEACTION WHERE SALEID = :saleid), 0) + 1,
+                    :actionid,
+                    :actionstatus,
+                    TRUNC(SYSDATE) + 1,
+                    :request_remark
+                FROM XININSURE.SALE S
+                WHERE S.SALEID = :saleid
+            """
+        action_status = "W"
+        request_remark = "Auto Cancel MT สินเชื่อ ESY อนุมัติแล้วไม่สามารถยกเลิกได้ รบกวนตรวจสอบค่ะ"
+        try:
+
+            for index, row in df.iterrows():
+                print("Fetching data...")
+                ResActionCode = Check_action_code(row, df_actionData) ## df.row
+                if ResActionCode is not None:
+                    cursor.execute(sql, {
+                        "saleid": row["SALEID"],
+                        "actionid": ResActionCode["ACTIONID"],
+                        "actionstatus" : action_status,
+                        "request_remark" : request_remark
+                    })
+                    print(f"Insert {index}: SALEID={row['SALEID']}, ACTIONID={ResActionCode}")
+
+            formatted_table = df.to_markdown(index=False)
+            # print(query)
+            print(f"\n{formatted_table}")
+            print(f"Get data successfully")
+            print(f"df: {len(df)}")
+
+            conn.commit() 
+            return { 'Set_action_code': df }
+        
+        except oracledb.Error as e:
+            print(f"Get_Data : {e}")
+        finally:
+            cursor.close()
+            conn.close()
             
     # ตั้งโค๊ด C21 กรณีชำระหลังมีการตั้ง Code ยกเลิกไปแล้ว และ เป็นศูนย์ประสานงาน
     # def Insert_C21_Routes_deadline(**kwargs):
@@ -456,13 +602,14 @@ with DAG(
     work_path = EmptyOperator(task_id="Work_path", trigger_rule="none_failed_min_one_success")
     join_x = EmptyOperator(task_id="join_x_branch", trigger_rule="none_failed_min_one_success")
     join_v = EmptyOperator(task_id="join_v_branch", trigger_rule="none_failed_min_one_success")
-    execute_x = EmptyOperator(task_id="execute_x_path", trigger_rule="none_failed_min_one_success")
+    # execute_x = EmptyOperator(task_id="execute_x_path", trigger_rule="none_failed_min_one_success")
     execute_v = EmptyOperator(task_id="execute_v_path", trigger_rule="none_failed_min_one_success")
     # get_cancellation_work = EmptyOperator(task_id="get_cancellation_work", trigger_rule="none_failed_min_one_success")
     
     #task ที่ไป call function
     check_holiday_task = check_holiday()
     get_cancellation_work = Get_cancelled_work()
+    execute_x = Set_action_code()
     
     #กำหนด workflow
     (
