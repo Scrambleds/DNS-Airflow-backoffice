@@ -147,8 +147,9 @@ with DAG(
     execute_x = EmptyOperator(task_id="execute_x_path", trigger_rule="none_failed_min_one_success")
     execute_v = EmptyOperator(task_id="execute_v_path", trigger_rule="none_failed_min_one_success")
     get_cancellation_work = EmptyOperator(task_id="get_cancellation_work", trigger_rule="none_failed_min_one_success")
-    # Define workflow
     
+    
+    #กำหนด workflow
     #task ที่ไป call function
     check_holiday_task = check_holiday()
     
