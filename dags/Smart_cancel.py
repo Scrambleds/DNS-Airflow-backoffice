@@ -435,13 +435,13 @@ with DAG(
     #     try:
     #         # เรียกใช้ฟังก์ชัน Insert_M13_deadline
     #         print("Running Insert_M13_deadline...")
-    #         df_m13 = Insert_C21_Routes_deadline(**kwargs)
-    #         if df_m13 is not None:
-    #             print(f"Insert_M13_deadline updated {len(df_m13)} records.")
+    #         df_C21 = Insert_C21_Routes_deadline(**kwargs)
+    #         if df_C21 is not None:
+    #             print(f"Insert_C21_Routes_deadline {len(df_C21)} records.")
 
 
     #         print("All tasks completed successfully.")
-    #         # print (f'{"SUM insert deadline",(len(df_m13) + len(df_c21_842) + len(df_c21_routes) + len(df_cp60))}')
+    #         # print (f'{"SUM insert deadline",(len(df_C21))}')
     #         return True
 
     #     except Exception as e:
