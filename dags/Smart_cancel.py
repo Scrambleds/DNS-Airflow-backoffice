@@ -144,6 +144,7 @@ with DAG(
     join_v = EmptyOperator(task_id="join_v_branch", trigger_rule="none_failed_min_one_success")
     execute_x = EmptyOperator(task_id="execute_x_path", trigger_rule="none_failed_min_one_success")
     execute_v = EmptyOperator(task_id="execute_v_path", trigger_rule="none_failed_min_one_success")
+    get_cancellation_work = EmptyOperator(task_id="get_cancellation_work", trigger_rule="none_failed_min_one_success")
     # Define workflow
     check_holiday_task = check_holiday()
     
@@ -152,7 +153,7 @@ with DAG(
         holiday_path >> end,
         
         #ระงับยกเลิกไป join x , ยกเลิกไป join v
-        work_path >> [join_x, join_v],
+        work_path >> get_cancellation_work >> [join_x, join_v],
         
         
         # แทนค่าด้วยฟังก์ชันระงับยกเลิกได้เลย
