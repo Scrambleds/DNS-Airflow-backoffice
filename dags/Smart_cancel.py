@@ -420,15 +420,17 @@ with DAG(
             
             df_digital_room = df.query("DEPARTMENTGROUP in ('DM')")
             
+            df_notin_digital_room = df.query("DEPARTMENTGROUP not in ('DM')")
+            
             # df_esy02 = df.query("ACTIONCODE in ('ESY02') and ACTIONSTATUS in ('Y')")
             
-            formatted_table = df.to_markdown(index=False)
+            formatted_table = df_notin_digital_room.to_markdown(index=False)
             # print(query)
             print(f"\n{formatted_table}")
             print(f"Get data successfully")
-            print(f"df: {len(df)}")
+            print(f"df: {len(df_notin_digital_room)}")
             
-            return { 'df_cancel_work': df, 'df_digital_room': df_digital_room }
+            return { 'df_cancel_work': df_notin_digital_room, 'df_digital_room': df_digital_room }
         
         except oracledb.Error as e:
             print(f"Get_Data : {e}")
@@ -536,43 +538,57 @@ with DAG(
             
             # เก็บ index ของ row ที่ผ่านเงื่อนไข
             valid_indices = []
-            
-            i = 0
+            not_valid_indices = []
+
+            i=0
             for index, row in df.iterrows():
                 saleid = row['SALEID']
-                
-                # เช็คว่ามี ESY02 หรือไม่
                 cursor.execute(check_esy02_query, {'SALEID': saleid})
                 count_result = cursor.fetchone()
                 record_count = count_result[0] if count_result else 0
-                
+
                 if record_count >= 1:
                     valid_indices.append(index)
                     print(f"Number: {i+1} Found ESY02 for SALEID={saleid} - Added to result")
                 else:
-                    print(f"Number: {i+1} No ESY02 found for SALEID={saleid} - Skipped")
+                    not_valid_indices.append(index)
+                    print(f"Number: {i+1} No ESY02 found for SALEID={saleid} - Added to not_esy")
                 i += 1
+
+                df_result_is_esy = df.loc[valid_indices].copy() if valid_indices else pd.DataFrame()
+                df_result_not_esy = df.loc[not_valid_indices].copy() if not_valid_indices else pd.DataFrame()
+
+                if not df_result_is_esy.empty and "RESULTCODE" in df_result_is_esy.columns:
+                    df_filter_esy_noresultcode = df_result_is_esy.query("RESULTCODE not in ('XPOL', 'XALL', 'XPRB')")
+                    df_filter_esy_resultcode = df_result_is_esy.query("RESULTCODE in ('XPOL', 'XALL', 'XPRB')")
+                else:
+                    df_filter_esy_noresultcode = pd.DataFrame()
+                    df_filter_esy_resultcode = pd.DataFrame()
+
+                if not df_result_not_esy.empty and "RESULTCODE" in df_result_not_esy.columns:
+                    df_filter_notesy_noresultcode = df_result_not_esy.query("RESULTCODE not in ('XPOL', 'XALL', 'XPRB')")
+                    df_filter_notesy_resultcode = df_result_not_esy.query("RESULTCODE in ('XPOL', 'XALL', 'XPRB')")
+                else:
+                    df_filter_notesy_noresultcode = pd.DataFrame()
+                    df_filter_notesy_resultcode = pd.DataFrame()
             
-            # กรอง DataFrame ตาม valid_indices
-            df_result = df.loc[valid_indices].copy() if valid_indices else pd.DataFrame()
-            
-            df_filter_noresultcode = df_result.query("RESULTCODE not in ('XPOL', 'XALL', 'XPRB')")
-            
-            df_filter_resultcode = df_result.query("RESULTCODE in ('XPOL', 'XALL', 'XPRB')")
-            
-            formatted_table = df_result.to_markdown(index=False)
+            formatted_table = df.to_markdown(index=False)
             print(f"\n{formatted_table}")
             print(f"Select ESY02 data successfully")
-            print(f"Total records found: {len(df_result)}")
+            print(f"Total records found: {len(df)}")
             print(f"Total SALEIDs checked: {len(df)}")
-            print(f"Total no_result_code = {df_filter_noresultcode}")
-            print(f"Total has_result_code = {df_filter_resultcode}")
+            print(f"Total is esy no_result_code = {df_filter_esy_noresultcode}")
+            print(f"Total is esy has_result_code = {df_filter_esy_resultcode}")
+            print(f"Total not esy no_result_code = {df_filter_notesy_noresultcode}")
+            print(f"Total not esy has_result_code = {df_filter_notesy_resultcode}")
+            
             request_remark= "Auto Cancel MT สินเชื่อ ESY อนุมัติแล้วไม่สามารถยกเลิกได้ รบกวนตรวจสอบค่ะ"
             action_status="X"
             
             conn.commit()
             
-            return { 'action_status' : action_status , 'request_remark' : request_remark, 'Select_esy02_X' : df_filter_noresultcode, 'No_resultcode' : df_filter_resultcode }
+            return { 'action_status' : action_status , 'request_remark' : request_remark, 'Select_esy02_X' : df_filter_esy_noresultcode, 
+                    'esy_resultcode' : df_filter_esy_resultcode, 'df_filter_notesy_noresultcode' :  df_filter_notesy_noresultcode, 'df_filter_notesy_resultcode': df_filter_notesy_resultcode}
             
         except oracledb.Error as error:
             conn.rollback()  
@@ -788,7 +804,7 @@ with DAG(
         holiday_path >> end,
         
         #ระงับยกเลิกไป join x , ยกเลิกไป join v
-        work_path >> get_cancellation_work >> get_esy02_X_task >> insert_digital_DM_task >> [join_x, join_v],
+        work_path >> get_cancellation_work >> insert_digital_DM_task >> get_esy02_X_task >> [join_x, join_v],
         
         # แทนค่าด้วยฟังก์ชันระงับยกเลิกได้เลย
         join_x >> execute_x >> end,
