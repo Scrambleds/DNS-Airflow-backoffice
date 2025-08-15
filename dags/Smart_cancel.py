@@ -556,17 +556,23 @@ with DAG(
             # กรอง DataFrame ตาม valid_indices
             df_result = df.loc[valid_indices].copy() if valid_indices else pd.DataFrame()
             
+            df_filter_noresultcode = df_result.query("RESULTCODE not in ('XPOL', 'XALL', 'XPRB')")
+            
+            df_filter_resultcode = df_result.query("RESULTCODE in ('XPOL', 'XALL', 'XPRB')")
+            
             formatted_table = df_result.to_markdown(index=False)
             print(f"\n{formatted_table}")
             print(f"Select ESY02 data successfully")
             print(f"Total records found: {len(df_result)}")
             print(f"Total SALEIDs checked: {len(df)}")
+            print(f"Total no_result_code = {df_filter_noresultcode}")
+            print(f"Total has_result_code = {df_filter_resultcode}")
             request_remark= "Auto Cancel MT สินเชื่อ ESY อนุมัติแล้วไม่สามารถยกเลิกได้ รบกวนตรวจสอบค่ะ"
             action_status="X"
             
             conn.commit()
             
-            return { 'action_status' : action_status , 'request_remark' : request_remark, 'Select_esy02_X' : df_result }
+            return { 'action_status' : action_status , 'request_remark' : request_remark, 'Select_esy02_X' : df_filter_noresultcode, 'No_resultcode' : df_filter_resultcode }
             
         except oracledb.Error as error:
             conn.rollback()  
