@@ -511,62 +511,155 @@ with DAG(
         try:
             # Query1: ดึงข้อมูลหลัก (เหมือนเดิมแต่ไม่มี PAIDAMOUNT และ TGD_PERCENT)
             query_get_esy02 = f"""
+                                SELECT
+                                S.SALEID,
+                                xininsure.getbookname(s.periodid,
+                                s.salebookcode,
+                                s.sequence) AS bookname,
+                                s.salebookcode,
+                                s.routeid,
+                                B.region,
+                                r.routecode,
+                                s.paidamount,
+                                s.cancelresultid,
+                                (
+                                SELECT
+                                    SB.BYTECODE
+                                FROM
+                                    XININSURE.SYSBYTEDES SB
+                                WHERE
+                                    SB.COLUMNNAME = 'PAYMENTSTATUS'
+                                    AND SB.TABLENAME = 'SALE'
+                                    AND SB.BYTECODE = S.PAYMENTSTATUS) AS PAYMENTSTATUS,
+                                S.PAYMENTMODE,
+                                F.STAFFCODE,
+                                F.STAFFTYPE,
+                                F.STAFFCODE || ':' || F.STAFFNAME AS STAFFNAME,
+                                D.DEPARTMENTID,
+                                D.DEPARTMENTCODE || ':' || D.DEPARTMENTNAME AS DEPARTMENTNAME,
+                                D.DEPARTMENTCODE,
+                                D.DEPARTMENTGROUP,
+                                sa.actionid,
+                                a.actioncode,
+                                sa.actionstatus,
+                                (
+                                SELECT
+                                    r.PROVINCECODE
+                                FROM
+                                    XININSURE.ROUTE r
+                                WHERE
+                                    s.ROUTEID = r.ROUTEID) AS PROVINCECODE,
+                                sa.RESULTID,
+                                (
+                                SELECT
+                                    r.RESULTCODE
+                                FROM
+                                    XININSURE.RESULT r
+                                WHERE
+                                    r.RESULTID = sa.RESULTID) AS RESULTCODE,
+                                S.MASTERSALEID,
+                                sa.duedate,
+                                sa.sequence,
+                                -- เพิ่ม sequence
+                                (
+                                SELECT
+                                    MAX(r.SAVEDATE)
+                                FROM
+                                    XININSURE.RECEIVEITEMCLEAR T,
+                                    xininsure.receiveitem i,
+                                    xininsure.receive r
+                                WHERE
+                                    t.receiveid = i.receiveid
+                                    AND t.receiveitem = i.receiveitem
+                                    AND i.receiveid = r.receiveid
+                                    AND r.receivestatus IN ('S', 'C')
+                                        AND i.receivebookcode NOT IN('R01', 'R03', 'R02', 'R04')
+                                            AND T.SALEID = sa.SALEID) AS LASTUPDATEDATETIME,
+                                (
+                                SELECT
+                                    max(rc.installment)
+                                FROM
+                                    xininsure.receiveitem ri,
+                                    xininsure.receiveitemclear rc
+                                WHERE
+                                    ri.receiveid = rc.receiveid
+                                    AND rc.receiveitem = rc.receiveitem
+                                    AND ri.saleid = S.SALEID) AS LASTINSTALLMENT,
+                                (
+                                SELECT
+                                    max(sa2.installment)
+                                FROM
+                                    xininsure.saleaction sa2
+                                WHERE
+                                    sa2.actionid = sa.actionid
+                                    AND sa2.actionstatus = 'W'
+                                    AND sa2.saleid = S.SALEID
+                                    AND sa2.sequence = 
+                                (
                                     SELECT
-                                        S.SALEID,
-                                        xininsure.getbookname(s.periodid, s.salebookcode, s.sequence) AS bookname,
-                                        s.salebookcode,
-                                        s.routeid,
-                                        B.region,
-                                        r.routecode,
-                                        s.paidamount,
-                                        s.cancelresultid,
-                                        (SELECT SB.BYTECODE FROM XININSURE.SYSBYTEDES SB 
-                                        WHERE SB.COLUMNNAME = 'PAYMENTSTATUS' AND SB.TABLENAME = 'SALE' 
-                                        AND SB.BYTECODE = S.PAYMENTSTATUS) AS PAYMENTSTATUS,
-                                        S.PAYMENTMODE,
-                                        F.STAFFCODE,
-                                        F.STAFFTYPE,
-                                        F.STAFFCODE || ':' || F.STAFFNAME AS STAFFNAME,
-                                        D.DEPARTMENTID,
-                                        D.DEPARTMENTCODE || ':' || D.DEPARTMENTNAME AS DEPARTMENTNAME,
-                                        D.DEPARTMENTCODE,
-                                        D.DEPARTMENTGROUP,
-                                        -- ข้อมูลจาก SALEACTION ที่ตรงเงื่อนไข ESY02
-                                        (SELECT sa.ACTIONID FROM XININSURE.SALEACTION sa 
-                                        JOIN XININSURE.ACTION a ON a.ACTIONID = sa.ACTIONID 
-                                        WHERE sa.SALEID = S.SALEID AND sa.ACTIONSTATUS = 'Y' AND a.ACTIONCODE = 'ESY02'
-                                        AND ROWNUM = 1) AS actionid,
-                                        'ESY02' AS actioncode,
-                                        'Y' AS actionstatus,
-                                        -- เพิ่มฟิลด์อื่นๆ ตาม query หลัก...
-                                        (SELECT r.PROVINCECODE FROM XININSURE.ROUTE r WHERE s.ROUTEID = r.ROUTEID) AS PROVINCECODE,
-                                        -- ... ฟิลด์อื่นๆ
-                                        PT.PRODUCTGROUP,
-                                        PT.PRODUCTTYPE
-                                    FROM XININSURE.SALE S,
-                                        XININSURE.STAFF F,
-                                        XININSURE.DEPARTMENT D,
-                                        XININSURE.PRODUCT P,
-                                        XININSURE.PRODUCTTYPE PT,
-                                        XININSURE.SUPPLIER SU,
-                                        XININSURE.ROUTE R,
-                                        XININSURE.BRANCH B
-                                    WHERE S.SALEID = :SALEID
-                                    AND S.STAFFID = F.STAFFID
-                                    AND S.STAFFDEPARTMENTID = D.DEPARTMENTID
-                                    AND S.ROUTEID = R.ROUTEID
-                                    AND S.PRODUCTID = P.PRODUCTID
-                                    AND P.SUPPLIERID = SU.SUPPLIERID
-                                    AND P.PRODUCTTYPE = PT.PRODUCTTYPE
-                                    AND B.BRANCHID = R.BRANCHID
-                                    -- เงื่อนไข ESY02 ใช้ EXISTS
-                                    AND EXISTS (
-                                        SELECT 1 FROM XININSURE.SALEACTION sa 
-                                        JOIN XININSURE.ACTION a ON a.ACTIONID = sa.ACTIONID 
-                                        WHERE sa.SALEID = S.SALEID 
-                                        AND sa.ACTIONSTATUS = 'Y' 
-                                        AND a.ACTIONCODE = 'ESY02'
-                                    )
+                                        max(sa3.sequence)
+                                    FROM
+                                        xininsure.saleaction sa3
+                                    WHERE
+                                        sa3.actionid = sa.actionid
+                                        AND sa3.actionstatus = 'W'
+                                        AND sa3.saleid = S.SALEID)) AS FOLLOWINSTALLMENT,
+                                su.SUPPLIERCODE,
+                                NVL((SELECT s2.BALANCE FROM xininsure.salepayment s2
+                                    WHERE s2.saleid = sa.saleid AND s2.balance > 0
+                                    AND s2.installment = (SELECT sa4.installment FROM xininsure.saleaction sa4
+                                                        WHERE sa4.saleid = sa.saleid AND sa4.actionid = 44 
+                                                        AND sa4.actionstatus = 'W'
+                                                        AND sa4.sequence = (SELECT max(sa5.sequence) FROM xininsure.saleaction sa5
+                                                                            WHERE sa5.saleid = sa.saleid AND sa5.actionid = 44 
+                                                                            AND sa5.actionstatus = 'W'))), 0) AS balance,
+                                PT.PRODUCTGROUP,
+                                PT.PRODUCTTYPE
+                            FROM
+                                XININSURE.SALE S
+                            INNER JOIN XININSURE.SALEACTION sa ON
+                                S.SALEID = sa.SALEID
+                            INNER JOIN XININSURE.ACTION a ON
+                                sa.ACTIONID = a.ACTIONID
+                            INNER JOIN XININSURE.STAFF F ON
+                                S.STAFFID = F.STAFFID
+                            INNER JOIN XININSURE.DEPARTMENT D ON
+                                S.STAFFDEPARTMENTID = D.DEPARTMENTID
+                            INNER JOIN XININSURE.ROUTE R ON
+                                S.ROUTEID = R.ROUTEID
+                            INNER JOIN XININSURE.PRODUCT P ON
+                                S.PRODUCTID = P.PRODUCTID
+                            INNER JOIN XININSURE.PRODUCTTYPE PT ON
+                                P.PRODUCTTYPE = PT.PRODUCTTYPE
+                            INNER JOIN XININSURE.SUPPLIER SU ON
+                                P.SUPPLIERID = SU.SUPPLIERID
+                            INNER JOIN XININSURE.BRANCH B ON
+                                B.BRANCHID = R.BRANCHID
+                            WHERE
+                                S.SALEID IN :SALEID  
+                            --	(44714986, 44714358, 44714234, 44714214, 44713768, 
+                            --                   44713660, 44713249, 44713114, 44712540, 44710889, 
+                            --                   44707858, 44707740, 44705907, 44614639, 43308782)
+                                AND sa.ACTIONSTATUS = 'Y'
+                                AND a.ACTIONCODE = 'ESY02'
+                                -- เงื่อนไขสำคัญ: เอาเฉพาะ sequence ล่าสุดของแต่ละ SALEID
+                                AND sa.sequence = (
+                                SELECT
+                                    MAX(sa_max.sequence)
+                                FROM
+                                    XININSURE.SALEACTION sa_max
+                                INNER JOIN XININSURE.ACTION a_max ON
+                                    sa_max.ACTIONID = a_max.ACTIONID
+                                WHERE
+                                    sa_max.SALEID = sa.SALEID
+                                    AND sa_max.ACTIONSTATUS = 'Y'
+                                    AND a_max.ACTIONCODE = 'ESY02'
+                            )
+                                AND S.PLATEID IS NULL
+                                AND S.CANCELDATE IS NULL
+                                AND S.CANCELEFFECTIVEDATE IS NULL
+                            ORDER BY
+                                S.SALEID DESC
             """
             
             i = 0
