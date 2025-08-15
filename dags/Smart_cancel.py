@@ -33,6 +33,8 @@ currentDate = currentDateAndTime.strftime("%Y-%m-%d")
 cmtel_config_str = config.get("variable", "CMTEL_config")
 cmt21_config_str = config.get("variable", "CMT21_config")
 
+invalid_action_codes = config.get("variable", "invalid_action_codes")
+
 def ConOracle():
     try:
         env = os.getenv('ENV', 'xininsure_dev')
@@ -164,6 +166,8 @@ def Check_action_code(row, df_actionData):
                 code = 'ZBR03'
             elif region in ['S']:
                 code = 'ZBR04'
+        elif actionCode in invalid_action_codes:
+            code = 'CMT105.1'
         
         print(code)
         if code:
@@ -428,7 +432,7 @@ with DAG(
             # print(query)
             print(f"\n{formatted_table}")
             print(f"Get data successfully")
-            print(f"df not in digital room: {len(df_notin_digital_room)}")
+            print(f"df: {len(df_notin_digital_room)}")
             
             return { 'df_cancel_work': df_notin_digital_room, 'df_digital_room': df_digital_room }
         
@@ -598,124 +602,47 @@ with DAG(
         finally:
             cursor.close()
             conn.close()
-            
 
-    @task #ตั้ง default ไปก่อนกัน error แก้ทีหลัง
-    def Set_action_code(action_status = "X", request_remark = "Auto Cancel MT สินเชื่อ ESY อนุมัติแล้วไม่สามารถยกเลิกได้ รบกวนตรวจสอบค่ะ", **kwargs, ):
+    @task
+    def process_esy_no_result_code(**kwargs):
         ti = kwargs["ti"]
         result = ti.xcom_pull(task_ids="Select_esy02_X", key="return_value")
+        df = result.get("Select_esy02_X", pd.DataFrame()) # easy no result code
 
-        df = result.get("Select_esy02_X", pd.DataFrame())
-        cursor, conn = ConOracle()
-        
-        df_actionData = Get_Actions()
-        
-        if df_actionData is None or df_actionData.empty:
-            print("Failed to get action data.")
-            cursor.close()
-            conn.close()
+        if df.empty:
+            print("No ESY records to process.")
             return None
-
-        sql = """
-                INSERT INTO XININSURE.SALEACTION(SALEID, SEQUENCE, ACTIONID, ACTIONSTATUS, DUEDATE, REQUESTREMARK)
-                SELECT S.SALEID,
-                    NVL((SELECT MAX(SEQUENCE) FROM XININSURE.SALEACTION WHERE SALEID = :saleid), 0) + 1,
-                    :actionid,
-                    :actionstatus,
-                    TRUNC(SYSDATE),
-                    :request_remark
-                FROM XININSURE.SALE S
-                WHERE S.SALEID = :saleid
-            """
-        # action_status = "X"
-        # request_remark = "Auto Cancel MT สินเชื่อ ESY อนุมัติแล้วไม่สามารถยกเลิกได้ รบกวนตรวจสอบค่ะ"
-        try:
-
-            for index, row in df.iterrows():
-                print("Fetching data...")
-                ResActionCode = Check_action_code(row, df_actionData) ## df.row
-                if ResActionCode is not None:
-                    cursor.execute(sql, {
-                        "saleid": row["SALEID"],
-                        "actionid": int(ResActionCode),
-                        "actionstatus" : action_status,
-                        "request_remark" : request_remark
-                    })
-                    print(f"Insert {index}: SALEID={row['SALEID']}, ACTIONID={ResActionCode}")
-
-            formatted_table = df.to_markdown(index=False)
-            # print(query)
-            print(f"\n{formatted_table}")
-            print(f"Get data successfully")
-            print(f"df: {len(df)}")
-
-            conn.commit() 
-            return { 'Set_action_code': df }
         
-        except oracledb.Error as e:
-            print(f"Get_Data : {e}")
-        finally:
-            cursor.close()
-            conn.close()
-            
-    @task #ตั้ง default ไปก่อนกัน error แก้ทีหลัง
-    def Set_action_code(action_status = "X", request_remark = "Auto Cancel MT สินเชื่อ ESY อนุมัติแล้วไม่สามารถยกเลิกได้ รบกวนตรวจสอบค่ะ", **kwargs, ):
+        actionCode = df["ACTIONCODE"].iloc[0] if not df.empty else None
+        if actionCode not in invalid_action_codes:
+            action_status = "X"
+            request_remark = "Auto Cancel MT สินเชื่อ ESY อนุมัติแล้ว ไม่สามารถยกเลิกได้ รบกวนตรวจสอบค่ะ"
+        else:
+            action_status = "W"
+            request_remark = "Auto Cancel MT สินเชื่อ ESY อนุมัติแล้ว ไม่สามารถยกเลิกได้ รบกวนตรวจสอบครับ"
+        Set_action_code(action_status, request_remark, df)
+        return None
+    
+    @task
+    def process_not_esy_no_result_code(**kwargs):
         ti = kwargs["ti"]
         result = ti.xcom_pull(task_ids="Select_esy02_X", key="return_value")
+        df = result.get("df_filter_notesy_noresultcode", pd.DataFrame()) # not easy no result code
 
-        df = result.get("Select_esy02_X", pd.DataFrame())
-        cursor, conn = ConOracle()
-        
-        df_actionData = Get_Actions()
-        
-        if df_actionData is None or df_actionData.empty:
-            print("Failed to get action data.")
-            cursor.close()
-            conn.close()
+        if df.empty:
+            print("No ESY records to process.")
             return None
 
-        sql = """
-                INSERT INTO XININSURE.SALEACTION(SALEID, SEQUENCE, ACTIONID, ACTIONSTATUS, DUEDATE, REQUESTREMARK)
-                SELECT S.SALEID,
-                    NVL((SELECT MAX(SEQUENCE) FROM XININSURE.SALEACTION WHERE SALEID = :saleid), 0) + 1,
-                    :actionid,
-                    :actionstatus,
-                    TRUNC(SYSDATE),
-                    :request_remark
-                FROM XININSURE.SALE S
-                WHERE S.SALEID = :saleid
-            """
-        # action_status = "X"
-        # request_remark = "Auto Cancel MT สินเชื่อ ESY อนุมัติแล้วไม่สามารถยกเลิกได้ รบกวนตรวจสอบค่ะ"
-        try:
-
-            for index, row in df.iterrows():
-                print("Fetching data...")
-                ResActionCode = Check_action_code(row, df_actionData) ## df.row
-                if ResActionCode is not None:
-                    cursor.execute(sql, {
-                        "saleid": row["SALEID"],
-                        "actionid": int(ResActionCode),
-                        "actionstatus" : action_status,
-                        "request_remark" : request_remark
-                    })
-                    print(f"Insert {index}: SALEID={row['SALEID']}, ACTIONID={ResActionCode}")
-
-            formatted_table = df.to_markdown(index=False)
-            # print(query)
-            print(f"\n{formatted_table}")
-            print(f"Get data successfully")
-            print(f"df: {len(df)}")
-
-            conn.commit() 
-            return { 'Set_action_code': df }
-        
-        except oracledb.Error as e:
-            print(f"Get_Data : {e}")
-        finally:
-            cursor.close()
-            conn.close()
-            
+        actionCode = df["ACTIONCODE"].iloc[0]
+        if actionCode not in invalid_action_codes:
+            action_status = "X"
+            request_remark = "Auto Cancel MT รหัสผลที่กำหนดไม่ถูกต้อง ไม่สามารถดำเนินการยกเลิกได้ รบกวนตรวจสอบค่ะ"
+        else:
+            action_status = "W"
+            request_remark = "Auto Cancel MT รหัสผลที่กำหนดไม่ถูกต้อง ไม่สามารถดำเนินการยกเลิกได้ รบกวนตรวจสอบค่ะ"
+        Set_action_code(action_status, request_remark, df)
+        return None
+    
     @task
     def Check_payment_date(**kwargs):
         ti = kwargs["ti"]
@@ -744,6 +671,60 @@ with DAG(
             message = f"Fail with task {task_id} \n error : {e}"
             print(f"Check_payment_date : {e}")
             pass
+
+    # @task #ตั้ง default ไปก่อนกัน error แก้ทีหลัง
+    def Set_action_code(action_status = "X", request_remark = "Auto Cancel MT สินเชื่อ ESY อนุมัติแล้วไม่สามารถยกเลิกได้ รบกวนตรวจสอบค่ะ", df = pd.DataFrame()):
+        cursor, conn = ConOracle()
+        
+        df_actionData = Get_Actions()
+        
+        if df_actionData is None or df_actionData.empty:
+            print("Failed to get action data.")
+            cursor.close()
+            conn.close()
+            return None
+
+        sql = """
+                INSERT INTO XININSURE.SALEACTION(SALEID, SEQUENCE, ACTIONID, ACTIONSTATUS, DUEDATE, REQUESTREMARK)
+                SELECT S.SALEID,
+                    NVL((SELECT MAX(SEQUENCE) FROM XININSURE.SALEACTION WHERE SALEID = :saleid), 0) + 1,
+                    :actionid,
+                    :actionstatus,
+                    TRUNC(SYSDATE),
+                    :request_remark
+                FROM XININSURE.SALE S
+                WHERE S.SALEID = :saleid
+            """
+        # action_status = "X"
+        # request_remark = "Auto Cancel MT สินเชื่อ ESY อนุมัติแล้วไม่สามารถยกเลิกได้ รบกวนตรวจสอบค่ะ"
+        try:
+
+            for index, row in df.iterrows():
+                print("Fetching data...")
+                ResActionCode = Check_action_code(row, df_actionData) ## df.row
+                if ResActionCode is not None:
+                    cursor.execute(sql, {
+                        "saleid": row["SALEID"],
+                        "actionid": int(ResActionCode),
+                        "actionstatus" : action_status,
+                        "request_remark" : request_remark
+                    })
+                    print(f"Insert {index}: SALEID={row['SALEID']}, ACTIONID={ResActionCode}")
+
+            formatted_table = df.to_markdown(index=False)
+            # print(query)
+            print(f"\n{formatted_table}")
+            print(f"Get data successfully")
+            print(f"df: {len(df)}")
+
+            conn.commit() 
+            return { 'Set_action_code': df }
+        
+        except oracledb.Error as e:
+            print(f"Get_Data : {e}")
+        finally:
+            cursor.close()
+            conn.close()
             
     # ตั้งโค๊ด C21 กรณีชำระหลังมีการตั้ง Code ยกเลิกไปแล้ว และ เป็นศูนย์ประสานงาน
     # def Insert_C21_Routes_deadline(**kwargs):
@@ -875,12 +856,18 @@ with DAG(
     join_v = EmptyOperator(task_id="join_v_branch", trigger_rule="none_failed_min_one_success")
     # execute_x = EmptyOperator(task_id="execute_x_path", trigger_rule="none_failed_min_one_success")
     execute_v = EmptyOperator(task_id="execute_v_path", trigger_rule="none_failed_min_one_success")
+    # process_esy_task = EmptyOperator(task_id="process_esy_task", trigger_rule="none_failed_min_one_success")
+    # process_not_esy_task = EmptyOperator(task_id="process_not_esy_task", trigger_rule="none_failed_min_one_success")
+    # combine_task = EmptyOperator(task_id="combine_task", trigger_rule="none_failed_min_one_success")
     # get_cancellation_work = EmptyOperator(task_id="get_cancellation_work", trigger_rule="none_failed_min_one_success")
     
     #task ที่ไป call function
     check_holiday_task = check_holiday()
     get_cancellation_work = Get_cancelled_work()
-    execute_x = Set_action_code()
+    # execute_x = Set_action_code() change to function
+    # execute_x = get_esy_no_result_code()
+    process_esy_task = process_esy_no_result_code()
+    process_not_esy_task = process_not_esy_no_result_code()
     get_esy02_X_task = Select_esy02_X()
     insert_digital_DM_task = Insert_digital_DM()
     
@@ -894,7 +881,7 @@ with DAG(
         work_path >> get_cancellation_work >> insert_digital_DM_task >> get_esy02_X_task >> [join_x, join_v],
         
         # แทนค่าด้วยฟังก์ชันระงับยกเลิกได้เลย
-        join_x >> execute_x >> end,
+        join_x >> [process_esy_task, process_not_esy_task] >> end,
         
         join_v >> execute_v >> end,
     )
