@@ -144,7 +144,7 @@ def Check_action_code(row, df_actionData):
         cmtel_config = json.loads(cmtel_config_str)
         cmt21_config = json.loads(cmt21_config_str)
 
-        df_actionData = Get_Actions()
+        # df_actionData = Get_Actions()
         actionCode = row["ACTIONCODE"]
         staffCode = row["STAFFCODE"]
         code = ""
@@ -221,7 +221,7 @@ with DAG(
             print(f"check_holiday : {e}")
         finally:
             print(f"{message}")
-            
+    
     @task
     def Get_cancelled_work():
         cursor, conn = ConOracle()
@@ -231,7 +231,9 @@ with DAG(
                         xininsure.getbookname(s.periodid,
                         s.salebookcode,
                         s.sequence) AS bookname,
+                        s.salebookcode,
                         s.routeid ,
+                        B.region,
                         r.routecode,
                         s.paidamount,
                         s.cancelresultid,
@@ -245,10 +247,13 @@ with DAG(
             AND SB.TABLENAME = 'SALE'
                 AND SB.BYTECODE = S.PAYMENTSTATUS) AS PAYMENTSTATUS,
             S.PAYMENTMODE,
+            F.STAFFCODE,
+            F.STAFFTYPE,
             F.STAFFCODE || ':' || F.STAFFNAME AS STAFFNAME,
             D.DEPARTMENTID,
             D.DEPARTMENTCODE || ':' || D.DEPARTMENTNAME AS DEPARTMENTNAME,
             D.DEPARTMENTCODE,
+            D.DEPARTMENTGROUP,
             ssa.actionid,
             ssa.actioncode,
             ssa.actionstatus,
@@ -344,7 +349,8 @@ with DAG(
                     ),
                     0
                 )AS balance,
-                PT.PRODUCTGROUP
+                PT.PRODUCTGROUP,
+                PT.PRODUCTTYPE
             FROM
                 XININSURE.SALE S,
                 XININSURE.STAFF F,
@@ -353,6 +359,7 @@ with DAG(
                 XININSURE.PRODUCTTYPE PT,
                 XININSURE.SUPPLIER SU,
                 XININSURE.ROUTE R,
+                XININSURE.BRANCH B,
                 (
                 SELECT
                     SA.SALEID ,
@@ -361,7 +368,8 @@ with DAG(
                     a.actioncode ,
                     sa.actionstatus,
                     sa.RESULTID,
-                    sa.duedate
+                    sa.duedate,
+                    sa.sequence
                     FROM
                     XININSURE.SALEACTION SA,
                     xininsure.action a
@@ -372,9 +380,10 @@ with DAG(
                         AND sa.actionid = a.actionid
                         --ดำเนินการแล้ว
                         AND SA.ACTIONSTATUS IN ('R', 'W', 'Y')
+                        AND SA.DUEDATE = TO_DATE('25/07/2024', 'DD/MM/YYYY')
             --    AND SA.DUEDATE = TRUNC(SYSDATE) 
-                AND SA.DUEDATE >= TO_DATE('20/07/2024', 'DD/MM/YYYY')
-                AND SA.DUEDATE <= TO_DATE('30/07/2024', 'DD/MM/YYYY')
+            --    AND SA.DUEDATE >= TO_DATE('25/07/2024', 'DD/MM/YYYY')
+            --   AND SA.DUEDATE <= TO_DATE('30/07/2024', 'DD/MM/YYYY')
                 --AND    SA.DUEDATE <= TRUNC(SYSDATE) - 1
                 --AND sa.duedate >= to_date('07/05/2025', 'dd/mm/yyyy')
                 --AND sa.duedate <= to_date('10/05/2020', 'dd/mm/yyyy') 
@@ -387,12 +396,17 @@ with DAG(
                 AND S.PRODUCTID = P.PRODUCTID
                 AND P.SUPPLIERID = SU.SUPPLIERID
                 AND P.PRODUCTTYPE = PT.PRODUCTTYPE
+                AND B.BRANCHID = R.BRANCHID
             --    AND PT.PRODUCTGROUP = 'MT'
-                AND SU.SUPPLIERCODE IN ('KWIL','AIA','SSL','BKI','BLA','VY','DHP','TVI','MTI','MTL','MLI','ALIFE','FWD','KTAL','ACE','SELIC','PLA','TSLI')
+                AND SU.SUPPLIERCODE IN ('KWIL','AIA','SSL','BKI','BLA','VY','DHP','TVI','MTI','MTL','MLI','ALIFE','FWD','KTAL','ACE','SELIC','PLA','TSLI', 'ESY')
+            --    AND SU.SUPPLIERCODE IN ('ESY')
                 --อนุมัติ
                 AND S.PLATEID IS NULL
                 AND S.CANCELDATE IS NULL
                 AND S.CANCELEFFECTIVEDATE IS NULL
+            --    AND S.SALEID = 43415566
+            --    AND PT.PRODUCTTYPE IN ('LOAN', 'LOANX')
+            --    FETCH FIRST 1 ROWS only
             ORDER BY
                 s.SALEID DESC """
             
@@ -401,31 +415,207 @@ with DAG(
             df = pd.DataFrame(
                 cursor.fetchall(), columns=[desc[0] for desc in cursor.description]
             )
+            
+            df_digital_room = df.query("DEPARTMENTGROUP in ('DM')")
+            
+            # df_esy02 = df.query("ACTIONCODE in ('ESY02') and ACTIONSTATUS in ('Y')")
+            
             formatted_table = df.to_markdown(index=False)
             # print(query)
             print(f"\n{formatted_table}")
             print(f"Get data successfully")
             print(f"df: {len(df)}")
             
-            return { 'df_cancel_work': df }
+            return { 'df_cancel_work': df, 'df_digital_room': df_digital_room }
         
         except oracledb.Error as e:
             print(f"Get_Data : {e}")
             
         finally:
             cursor.close()
-            conn.close()           
-    
+            conn.close()          
+                
+    @task
+    def Insert_digital_DM(**kwargs):
+        ti = kwargs["ti"]
+        result = ti.xcom_pull(task_ids="Get_cancelled_work", key="return_value")
+
+        df = result.get("df_digital_room", pd.DataFrame())
+        
+        cursor, conn = ConOracle()
+        if cursor is None or conn is None:
+            return None
+        
+        try:
+            if df.empty:
+                print("DataFrame is empty. Exiting task.")
+                return df
+            else:
+
+                i = 0
+                for index, row in df.iterrows():
+                    action_code_insert = None
+                    request_remark = "Auto Cancel MT ห้องขาย DM กรุณาตรวจสอบเพิ่มเติมก่อนยกเลิก"
+                    action_status_update = "W"
+
+                    cursor.execute("""SELECT ACTIONID FROM XININSURE.ACTION a WHERE a.ACTIONCODE = 'CMT105.1'""")
+                    action_code_insert = cursor.fetchone()[0]
+
+                    if action_code_insert:
+                        insert_action_query = """
+                        INSERT INTO XININSURE.SALEACTION(SALEID, SEQUENCE, ACTIONID, ACTIONSTATUS, DUEDATE, REQUESTREMARK, ACTIONREMARK)
+                        SELECT X.SALEID,
+                            NVL((SELECT MAX(SEQUENCE) FROM XININSURE.SALEACTION WHERE SALEID = :saleid), 0) + 1,
+                            :actionid,
+                            :actionstatus,
+                            TRUNC(SYSDATE),
+                            :request_remark,
+                            '' 
+                        FROM XININSURE.SALE X
+                        WHERE X.SALEID = :saleid
+                        """
+                        cursor.execute(insert_action_query, {
+                            "saleid": row["SALEID"],
+                            "actionid": action_code_insert,
+                            "actionstatus": action_status_update,
+                            "request_remark": request_remark,
+                        })
+                        print(f"Insert {i+1}: SALEID={row['SALEID']}, ACTIONID={action_code_insert}")
+                        i += 1
+
+                conn.commit() 
+                return df
+
+        except oracledb.Error as error:
+            print(f"OracleDB Error: {error}")
+            conn.rollback()
+            return None
+
+        finally:
+            cursor.close()
+            conn.close() 
+        
+        
+    @task
+    def Select_esy02_X(**kwargs):
+        cursor, conn = ConOracle()
+        
+        ti = kwargs["ti"]
+        result = ti.xcom_pull(task_ids="Get_cancelled_work", key="return_value")
+        
+        df = result.get("df_cancel_work", pd.DataFrame())
+        
+        cursor, conn = ConOracle()
+        if cursor is None or conn is None:
+            return None
+        
+        try:
+            # Query1: ดึงข้อมูลหลัก (เหมือนเดิมแต่ไม่มี PAIDAMOUNT และ TGD_PERCENT)
+            query_get_esy02 = f"""
+                                    SELECT
+                                        S.SALEID,
+                                        xininsure.getbookname(s.periodid, s.salebookcode, s.sequence) AS bookname,
+                                        s.salebookcode,
+                                        s.routeid,
+                                        B.region,
+                                        r.routecode,
+                                        s.paidamount,
+                                        s.cancelresultid,
+                                        (SELECT SB.BYTECODE FROM XININSURE.SYSBYTEDES SB 
+                                        WHERE SB.COLUMNNAME = 'PAYMENTSTATUS' AND SB.TABLENAME = 'SALE' 
+                                        AND SB.BYTECODE = S.PAYMENTSTATUS) AS PAYMENTSTATUS,
+                                        S.PAYMENTMODE,
+                                        F.STAFFCODE,
+                                        F.STAFFTYPE,
+                                        F.STAFFCODE || ':' || F.STAFFNAME AS STAFFNAME,
+                                        D.DEPARTMENTID,
+                                        D.DEPARTMENTCODE || ':' || D.DEPARTMENTNAME AS DEPARTMENTNAME,
+                                        D.DEPARTMENTCODE,
+                                        D.DEPARTMENTGROUP,
+                                        -- ข้อมูลจาก SALEACTION ที่ตรงเงื่อนไข ESY02
+                                        (SELECT sa.ACTIONID FROM XININSURE.SALEACTION sa 
+                                        JOIN XININSURE.ACTION a ON a.ACTIONID = sa.ACTIONID 
+                                        WHERE sa.SALEID = S.SALEID AND sa.ACTIONSTATUS = 'Y' AND a.ACTIONCODE = 'ESY02'
+                                        AND ROWNUM = 1) AS actionid,
+                                        'ESY02' AS actioncode,
+                                        'Y' AS actionstatus,
+                                        -- เพิ่มฟิลด์อื่นๆ ตาม query หลัก...
+                                        (SELECT r.PROVINCECODE FROM XININSURE.ROUTE r WHERE s.ROUTEID = r.ROUTEID) AS PROVINCECODE,
+                                        -- ... ฟิลด์อื่นๆ
+                                        PT.PRODUCTGROUP,
+                                        PT.PRODUCTTYPE
+                                    FROM XININSURE.SALE S,
+                                        XININSURE.STAFF F,
+                                        XININSURE.DEPARTMENT D,
+                                        XININSURE.PRODUCT P,
+                                        XININSURE.PRODUCTTYPE PT,
+                                        XININSURE.SUPPLIER SU,
+                                        XININSURE.ROUTE R,
+                                        XININSURE.BRANCH B
+                                    WHERE S.SALEID = :SALEID
+                                    AND S.STAFFID = F.STAFFID
+                                    AND S.STAFFDEPARTMENTID = D.DEPARTMENTID
+                                    AND S.ROUTEID = R.ROUTEID
+                                    AND S.PRODUCTID = P.PRODUCTID
+                                    AND P.SUPPLIERID = SU.SUPPLIERID
+                                    AND P.PRODUCTTYPE = PT.PRODUCTTYPE
+                                    AND B.BRANCHID = R.BRANCHID
+                                    -- เงื่อนไข ESY02 ใช้ EXISTS
+                                    AND EXISTS (
+                                        SELECT 1 FROM XININSURE.SALEACTION sa 
+                                        JOIN XININSURE.ACTION a ON a.ACTIONID = sa.ACTIONID 
+                                        WHERE sa.SALEID = S.SALEID 
+                                        AND sa.ACTIONSTATUS = 'Y' 
+                                        AND a.ACTIONCODE = 'ESY02'
+                                    )
+            """
+            
+            i = 0
+            data = []
+            columns = None
+            for index, row in df.iterrows():
+                cursor.execute(query_get_esy02, {'saleid': row['SALEID']})
+                result = cursor.fetchone()
+                if result:
+                    if columns is None:
+                        columns = [desc[0] for desc in cursor.description]
+                    data.append(result)
+                print(f"Number: {i+1} Updated row {index}: SALEID={row['SALEID']}")
+                i+=1
+            
+            df_result = pd.DataFrame(data, columns=columns) if data else pd.DataFrame()
+            
+            df_result = df_result.loc[:, ~df_result.columns.duplicated()]
+            
+            formatted_table = df_result.to_markdown(index=False)
+            print(f"\n{formatted_table}")
+            print(f"Select data successfully")
+            print(f"Total records: {len(df_result)}")
+            
+            conn.commit()
+            
+            return {"Select_esy02_X": df_result}
+            
+        except oracledb.Error as error:
+            conn.rollback()  
+            message = f'เกิดข้อผิดพลาด : {error}'
+            print(message)
+            return {"Select_esy02_X": "error", "message": message}
+        finally:
+            cursor.close()
+            conn.close()
+            
 
     @task
     def Set_action_code(**kwargs):
         ti = kwargs["ti"]
-        result = ti.xcom_pull(task_ids="Get_cancelled_work", key="return_value")
+        result = ti.xcom_pull(task_ids="Select_esy02_X", key="return_value")
 
-        df = result.get("df_cancel_work", pd.DataFrame())
+        df = result.get("Select_esy02_X", pd.DataFrame())
         cursor, conn = ConOracle()
         
         df_actionData = Get_Actions()
+        
         if df_actionData is None or df_actionData.empty:
             print("Failed to get action data.")
             cursor.close()
@@ -610,6 +800,8 @@ with DAG(
     check_holiday_task = check_holiday()
     get_cancellation_work = Get_cancelled_work()
     execute_x = Set_action_code()
+    get_esy02_X_task = Select_esy02_X()
+    insert_digital_DM_task = Insert_digital_DM()
     
     #กำหนด workflow
     (
@@ -618,7 +810,7 @@ with DAG(
         holiday_path >> end,
         
         #ระงับยกเลิกไป join x , ยกเลิกไป join v
-        work_path >> get_cancellation_work >> [join_x, join_v],
+        work_path >> get_cancellation_work >> get_esy02_X_task >> insert_digital_DM_task >> [join_x, join_v],
         
         # แทนค่าด้วยฟังก์ชันระงับยกเลิกได้เลย
         join_x >> execute_x >> end,
