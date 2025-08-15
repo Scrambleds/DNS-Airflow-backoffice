@@ -382,7 +382,7 @@ with DAG(
                         AND sa.actionid = a.actionid
                         --ดำเนินการแล้ว
                         AND SA.ACTIONSTATUS IN ('R', 'W', 'Y')
-                        AND SA.DUEDATE = TO_DATE('25/07/2024', 'DD/MM/YYYY')
+                        AND SA.DUEDATE = TO_DATE('30/07/2024', 'DD/MM/YYYY')
             --    AND SA.DUEDATE = TRUNC(SYSDATE) 
             --    AND SA.DUEDATE >= TO_DATE('25/07/2024', 'DD/MM/YYYY')
             --   AND SA.DUEDATE <= TO_DATE('30/07/2024', 'DD/MM/YYYY')
