@@ -428,7 +428,7 @@ with DAG(
             # print(query)
             print(f"\n{formatted_table}")
             print(f"Get data successfully")
-            print(f"df: {len(df_notin_digital_room)}")
+            print(f"df not in digital room: {len(df_notin_digital_room)}")
             
             return { 'df_cancel_work': df_notin_digital_room, 'df_digital_room': df_digital_room }
         
@@ -657,6 +657,93 @@ with DAG(
         finally:
             cursor.close()
             conn.close()
+            
+    @task #ตั้ง default ไปก่อนกัน error แก้ทีหลัง
+    def Set_action_code(action_status = "X", request_remark = "Auto Cancel MT สินเชื่อ ESY อนุมัติแล้วไม่สามารถยกเลิกได้ รบกวนตรวจสอบค่ะ", **kwargs, ):
+        ti = kwargs["ti"]
+        result = ti.xcom_pull(task_ids="Select_esy02_X", key="return_value")
+
+        df = result.get("Select_esy02_X", pd.DataFrame())
+        cursor, conn = ConOracle()
+        
+        df_actionData = Get_Actions()
+        
+        if df_actionData is None or df_actionData.empty:
+            print("Failed to get action data.")
+            cursor.close()
+            conn.close()
+            return None
+
+        sql = """
+                INSERT INTO XININSURE.SALEACTION(SALEID, SEQUENCE, ACTIONID, ACTIONSTATUS, DUEDATE, REQUESTREMARK)
+                SELECT S.SALEID,
+                    NVL((SELECT MAX(SEQUENCE) FROM XININSURE.SALEACTION WHERE SALEID = :saleid), 0) + 1,
+                    :actionid,
+                    :actionstatus,
+                    TRUNC(SYSDATE),
+                    :request_remark
+                FROM XININSURE.SALE S
+                WHERE S.SALEID = :saleid
+            """
+        # action_status = "X"
+        # request_remark = "Auto Cancel MT สินเชื่อ ESY อนุมัติแล้วไม่สามารถยกเลิกได้ รบกวนตรวจสอบค่ะ"
+        try:
+
+            for index, row in df.iterrows():
+                print("Fetching data...")
+                ResActionCode = Check_action_code(row, df_actionData) ## df.row
+                if ResActionCode is not None:
+                    cursor.execute(sql, {
+                        "saleid": row["SALEID"],
+                        "actionid": int(ResActionCode),
+                        "actionstatus" : action_status,
+                        "request_remark" : request_remark
+                    })
+                    print(f"Insert {index}: SALEID={row['SALEID']}, ACTIONID={ResActionCode}")
+
+            formatted_table = df.to_markdown(index=False)
+            # print(query)
+            print(f"\n{formatted_table}")
+            print(f"Get data successfully")
+            print(f"df: {len(df)}")
+
+            conn.commit() 
+            return { 'Set_action_code': df }
+        
+        except oracledb.Error as e:
+            print(f"Get_Data : {e}")
+        finally:
+            cursor.close()
+            conn.close()
+            
+    @task
+    def Check_payment_date(**kwargs):
+        ti = kwargs["ti"]
+        task_id = kwargs['task_instance'].task_id
+        try_number = kwargs['task_instance'].try_number
+        message = f"Processing task {task_id} ,try_number {try_number}"
+        print(f"{message}")
+        
+        result = ti.xcom_pull(task_ids="Select_esy02_X", key="return_value")
+        df_esy_result = result["df_filter_notesy_resultcode"]
+        
+        result = ti.xcom_pull(task_ids="Select_esy02_X", key="return_value")
+        df_esy_noresult = result["df_filter_notesy_noresultcode"]
+
+        df = pd.DataFrame(columns=df_esy_result.columns)
+        try:
+            df = pd.concat([df_esy_result,df_esy_noresult],ignore_index=True)
+            print(f"df: {len(df)}")
+            # mask = df["LASTUPDATEDATETIME"] >= df["DUEDATE"]
+            mask = df["BALANCE"] > 0
+            df_has_paid = df[mask]
+            df_no_paid = df[~mask]
+            
+            return {"df_has_paid":df_has_paid,"df_no_paid":df_no_paid}
+        except Exception as e:
+            message = f"Fail with task {task_id} \n error : {e}"
+            print(f"Check_payment_date : {e}")
+            pass
             
     # ตั้งโค๊ด C21 กรณีชำระหลังมีการตั้ง Code ยกเลิกไปแล้ว และ เป็นศูนย์ประสานงาน
     # def Insert_C21_Routes_deadline(**kwargs):
