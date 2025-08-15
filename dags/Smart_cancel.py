@@ -605,8 +605,8 @@ with DAG(
             conn.close()
             
 
-    @task
-    def Set_action_code(action_status, request_remark, **kwargs, ):
+    @task #ตั้ง default ไปก่อนกัน error แก้ทีหลัง
+    def Set_action_code(action_status = "X", request_remark = "Auto Cancel MT สินเชื่อ ESY อนุมัติแล้วไม่สามารถยกเลิกได้ รบกวนตรวจสอบค่ะ", **kwargs, ):
         ti = kwargs["ti"]
         result = ti.xcom_pull(task_ids="Select_esy02_X", key="return_value")
 
