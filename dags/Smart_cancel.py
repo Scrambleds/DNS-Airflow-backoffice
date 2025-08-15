@@ -144,7 +144,6 @@ def Check_action_code(row, df_actionData):
         cmtel_config = json.loads(cmtel_config_str)
         cmt21_config = json.loads(cmt21_config_str)
 
-        # df_actionData = Get_Actions()
         actionCode = row["ACTIONCODE"]
         staffCode = row["STAFFCODE"]
         code = ""
@@ -607,7 +606,7 @@ with DAG(
             
 
     @task
-    def Set_action_code(**kwargs):
+    def Set_action_code(action_status, request_remark, **kwargs, ):
         ti = kwargs["ti"]
         result = ti.xcom_pull(task_ids="Select_esy02_X", key="return_value")
 
@@ -628,13 +627,13 @@ with DAG(
                     NVL((SELECT MAX(SEQUENCE) FROM XININSURE.SALEACTION WHERE SALEID = :saleid), 0) + 1,
                     :actionid,
                     :actionstatus,
-                    TRUNC(SYSDATE) + 1,
+                    TRUNC(SYSDATE),
                     :request_remark
                 FROM XININSURE.SALE S
                 WHERE S.SALEID = :saleid
             """
-        action_status = "W"
-        request_remark = "Auto Cancel MT สินเชื่อ ESY อนุมัติแล้วไม่สามารถยกเลิกได้ รบกวนตรวจสอบค่ะ"
+        # action_status = "X"
+        # request_remark = "Auto Cancel MT สินเชื่อ ESY อนุมัติแล้วไม่สามารถยกเลิกได้ รบกวนตรวจสอบค่ะ"
         try:
 
             for index, row in df.iterrows():
