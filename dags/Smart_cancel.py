@@ -607,7 +607,7 @@ with DAG(
     def process_esy_no_result_code(**kwargs):
         ti = kwargs["ti"]
         result = ti.xcom_pull(task_ids="Select_esy02_X", key="return_value")
-        df = result.get("Select_esy02_X", pd.DataFrame()) # easy no result code
+        df = result.get("df_filter_esy_noresultcode", pd.DataFrame()) # easy no result code
 
         if df.empty:
             print("No ESY records to process.")
@@ -630,7 +630,7 @@ with DAG(
         df = result.get("df_filter_notesy_noresultcode", pd.DataFrame()) # not easy no result code
 
         if df.empty:
-            print("No ESY records to process.")
+            print("No NOT ESY records to process.")
             return None
 
         actionCode = df["ACTIONCODE"].iloc[0]
