@@ -591,8 +591,8 @@ with DAG(
             
             conn.commit()
             
-            return { 'action_status' : action_status , 'request_remark' : request_remark, 'Select_esy02_X' : df_filter_esy_noresultcode, 
-                    'esy_resultcode' : df_filter_esy_resultcode, 'df_filter_notesy_noresultcode' :  df_filter_notesy_noresultcode, 'df_filter_notesy_resultcode': df_filter_notesy_resultcode}
+            return { 'action_status' : action_status , 'request_remark' : request_remark, 'df_filter_esy_noresultcode' : df_filter_esy_noresultcode, 
+                    'df_filter_esy_resultcode' : df_filter_esy_resultcode, 'df_filter_notesy_noresultcode' :  df_filter_notesy_noresultcode, 'df_filter_notesy_resultcode': df_filter_notesy_resultcode}
             
         except oracledb.Error as error:
             conn.rollback()  
@@ -652,10 +652,10 @@ with DAG(
         print(f"{message}")
         
         result = ti.xcom_pull(task_ids="Select_esy02_X", key="return_value")
-        df_esy_result = result["df_filter_notesy_resultcode"]
+        df_esy_result = result["df_filter_esy_noresultcode"]
         
         result = ti.xcom_pull(task_ids="Select_esy02_X", key="return_value")
-        df_esy_noresult = result["df_filter_notesy_noresultcode"]
+        df_esy_noresult = result["df_filter_esy_noresultcode"]
 
         df = pd.DataFrame(columns=df_esy_result.columns)
         try:
