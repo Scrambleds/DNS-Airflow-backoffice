@@ -243,6 +243,9 @@ with DAG(
                         r.routecode,
                         s.paidamount,
                         s.cancelresultid,
+                        ST.RETURNDATE,
+                        ssa.ACTIONREMARK,
+                        ssa.REQUESTREMARK,
                         (
                         SELECT
                             SB.BYTECODE
@@ -366,6 +369,7 @@ with DAG(
                 XININSURE.SUPPLIER SU,
                 XININSURE.ROUTE R,
                 XININSURE.BRANCH B,
+                XININSURE.STOCK ST,
                 (
                 SELECT
                     SA.SALEID ,
@@ -375,6 +379,8 @@ with DAG(
                     sa.actionstatus,
                     sa.RESULTID,
                     sa.duedate,
+                    sa.ACTIONREMARK,
+                    sa.REQUESTREMARK,
                     sa.sequence
                     FROM
                     XININSURE.SALEACTION SA,
@@ -383,17 +389,13 @@ with DAG(
                     SA.ACTIONID IN(3760, 3761, 2261, 3740, 3741, 3742, 3743,
                     5933, 11293, 7533, 9133, 9174, 11574, 11575, 11576, 
                     11577, 11553, 11554, 11555, 15014)
-                        AND sa.actionid = a.actionid
-                        --ดำเนินการแล้ว
-                        AND SA.ACTIONSTATUS IN ('R', 'W', 'Y')
-                        AND SA.DUEDATE = TO_DATE('30/07/2024', 'DD/MM/YYYY')
-            --    AND SA.DUEDATE = TRUNC(SYSDATE) 
-            --    AND SA.DUEDATE >= TO_DATE('25/07/2024', 'DD/MM/YYYY')
-            --   AND SA.DUEDATE <= TO_DATE('30/07/2024', 'DD/MM/YYYY')
-                --AND    SA.DUEDATE <= TRUNC(SYSDATE) - 1
-                --AND sa.duedate >= to_date('07/05/2025', 'dd/mm/yyyy')
-                --AND sa.duedate <= to_date('10/05/2020', 'dd/mm/yyyy') 
-                                ) SSA
+                    AND sa.actionid = a.actionid
+                    --ดำเนินการแล้ว
+                    AND SA.ACTIONSTATUS IN ('R', 'W', 'Y')
+				-- AND SA.DUEDATE = TO_DATE('30/07/2024', 'DD/MM/YYYY')
+              		AND SA.DUEDATE >= TO_DATE('20/07/2024', 'DD/MM/YYYY')
+              		AND SA.DUEDATE <= TO_DATE('30/07/2024', 'DD/MM/YYYY')
+                 ) SSA
             WHERE
                 S.SALEID = SSA.SALEID
                 AND S.STAFFID = F.STAFFID
@@ -403,18 +405,15 @@ with DAG(
                 AND P.SUPPLIERID = SU.SUPPLIERID
                 AND P.PRODUCTTYPE = PT.PRODUCTTYPE
                 AND B.BRANCHID = R.BRANCHID
-            --    AND PT.PRODUCTGROUP = 'MT'
+                AND ST.SALEID = S.SALEID
+                -- AND PT.PRODUCTGROUP = 'MT'
                 AND SU.SUPPLIERCODE IN ('KWIL','AIA','SSL','BKI','BLA','VY','DHP','TVI','MTI','MTL','MLI','ALIFE','FWD','KTAL','ACE','SELIC','PLA','TSLI', 'ESY')
-            --    AND SU.SUPPLIERCODE IN ('ESY')
                 --อนุมัติ
                 AND S.PLATEID IS NULL
                 AND S.CANCELDATE IS NULL
                 AND S.CANCELEFFECTIVEDATE IS NULL
-            --    AND S.SALEID = 43415566
-            --    AND PT.PRODUCTTYPE IN ('LOAN', 'LOANX')
-            --    FETCH FIRST 1 ROWS only
             ORDER BY
-                s.SALEID DESC """
+                s.SALEID DESC  """
             
             print("Fetching data...")
             cursor.execute(query)
@@ -644,7 +643,7 @@ with DAG(
         return None
     
     @task
-    def Check_payment_date(**kwargs):
+    def Check_balance(**kwargs):
         ti = kwargs["ti"]
         task_id = kwargs['task_instance'].task_id
         try_number = kwargs['task_instance'].try_number
@@ -663,8 +662,37 @@ with DAG(
             print(f"df: {len(df)}")
             # mask = df["LASTUPDATEDATETIME"] >= df["DUEDATE"]
             mask = df["BALANCE"] > 0
-            df_has_paid = df[mask]
-            df_no_paid = df[~mask]
+            df_no_paid = df[mask]
+            df_has_paid = df[~mask]
+            
+            return {"df_has_paid":df_has_paid,"df_no_paid":df_no_paid}
+        except Exception as e:
+            message = f"Fail with task {task_id} \n error : {e}"
+            print(f"Check_payment_date : {e}")
+            pass
+        
+    @task
+    def Check_package_balance(**kwargs):
+        ti = kwargs["ti"]
+        task_id = kwargs['task_instance'].task_id
+        try_number = kwargs['task_instance'].try_number
+        message = f"Processing task {task_id} ,try_number {try_number}"
+        print(f"{message}")
+        
+        result = ti.xcom_pull(task_ids="Select_esy02_X", key="return_value")
+        df_esy_result = result["df_filter_esy_noresultcode"]
+        
+        result = ti.xcom_pull(task_ids="Select_esy02_X", key="return_value")
+        df_esy_noresult = result["df_filter_esy_noresultcode"]
+
+        df = pd.DataFrame(columns=df_esy_result.columns)
+        try:
+            df = pd.concat([df_esy_result,df_esy_noresult],ignore_index=True)
+            print(f"df: {len(df)}")
+            # mask = df["LASTUPDATEDATETIME"] >= df["DUEDATE"]
+            mask = df["BALANCE"] > 0
+            df_no_paid = df[mask]
+            df_has_paid = df[~mask]
             
             return {"df_has_paid":df_has_paid,"df_no_paid":df_no_paid}
         except Exception as e:
