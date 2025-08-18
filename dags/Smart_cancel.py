@@ -266,6 +266,7 @@ with DAG(
             ssa.actionid,
             ssa.actioncode,
             ssa.actionstatus,
+            ssa.SEQUENCE,
             (
             SELECT
                 r.PROVINCECODE
@@ -406,14 +407,14 @@ with DAG(
                 AND P.PRODUCTTYPE = PT.PRODUCTTYPE
                 AND B.BRANCHID = R.BRANCHID
                 AND ST.SALEID = S.SALEID
-                -- AND PT.PRODUCTGROUP = 'MT'
+--                AND PT.PRODUCTGROUP = 'MT'
                 AND SU.SUPPLIERCODE IN ('KWIL','AIA','SSL','BKI','BLA','VY','DHP','TVI','MTI','MTL','MLI','ALIFE','FWD','KTAL','ACE','SELIC','PLA','TSLI', 'ESY')
                 --อนุมัติ
                 AND S.PLATEID IS NULL
                 AND S.CANCELDATE IS NULL
                 AND S.CANCELEFFECTIVEDATE IS NULL
             ORDER BY
-                s.SALEID DESC  """
+                s.SALEID DESC   """
             
             print("Fetching data...")
             cursor.execute(query)
@@ -651,7 +652,7 @@ with DAG(
         print(f"{message}")
         
         result = ti.xcom_pull(task_ids="Select_esy02_X", key="return_value")
-        df_esy_result = result["df_filter_esy_noresultcode"]
+        df_esy_result = result["df_filter_esy_resultcode"]
         
         result = ti.xcom_pull(task_ids="Select_esy02_X", key="return_value")
         df_esy_noresult = result["df_filter_esy_noresultcode"]
@@ -661,7 +662,7 @@ with DAG(
             df = pd.concat([df_esy_result,df_esy_noresult],ignore_index=True)
             print(f"df: {len(df)}")
             # mask = df["LASTUPDATEDATETIME"] >= df["DUEDATE"]
-            mask = df["BALANCE"] > 0
+            mask = df["PAIDAMOUNT"] > 0
             df_no_paid = df[mask]
             df_has_paid = df[~mask]
             
@@ -679,22 +680,70 @@ with DAG(
         message = f"Processing task {task_id} ,try_number {try_number}"
         print(f"{message}")
         
-        result = ti.xcom_pull(task_ids="Select_esy02_X", key="return_value")
-        df_esy_result = result["df_filter_esy_noresultcode"]
+        result = ti.xcom_pull(task_ids="Check_balance", key="return_value")
+        df_has_paid = result["df_has_paid"]
         
-        result = ti.xcom_pull(task_ids="Select_esy02_X", key="return_value")
-        df_esy_noresult = result["df_filter_esy_noresultcode"]
+        result = ti.xcom_pull(task_ids="Check_balance", key="return_value")
+        df_no_paid = result["df_no_paid"]
 
-        df = pd.DataFrame(columns=df_esy_result.columns)
+        df = pd.DataFrame(columns=df_has_paid.columns)
         try:
-            df = pd.concat([df_esy_result,df_esy_noresult],ignore_index=True)
-            print(f"df: {len(df)}")
+            # df = pd.concat([df_has_paid,df_no_paid],ignore_index=True)
+            # print(f"df: {len(df)}")
             # mask = df["LASTUPDATEDATETIME"] >= df["DUEDATE"]
-            mask = df["BALANCE"] > 0
-            df_no_paid = df[mask]
-            df_has_paid = df[~mask]
+            # mask = df["BALANCE"] > 0
+            # df_no_paid = df[mask]
+            # df_has_paid = df[~mask]
             
-            return {"df_has_paid":df_has_paid,"df_no_paid":df_no_paid}
+            df_paymentstatus_Y = df_has_paid.query("BALANCE == 0 and PAYMENTSTATUS == 'Y'")
+            df_paymentstatus_not_Y = df_no_paid.query("BALANCE >= 0 and PAYMENTSTATUS not in 'Y")
+            formatted_table_df_paymentstatus_Y = df_paymentstatus_Y.to_markdown(index=False)
+            formatted_table_df_paymentstatus_not_Y = df_paymentstatus_not_Y.to_markdown(index=False)
+            
+            # print(query)
+            print(f"\n{formatted_table_df_paymentstatus_Y}")
+            print(f"\n{formatted_table_df_paymentstatus_not_Y}")
+            
+            return {"df_paymentstatus_Y":df_paymentstatus_Y, "df_paymentstatus_not_Y":df_paymentstatus_not_Y}
+        
+        except Exception as e:
+            message = f"Fail with task {task_id} \n error : {e}"
+            print(f"Check_payment_date : {e}")
+            pass
+        
+    @task
+    def Check_return_date(**kwargs):
+        ti = kwargs["ti"]
+        task_id = kwargs['task_instance'].task_id
+        try_number = kwargs['task_instance'].try_number
+        message = f"Processing task {task_id} ,try_number {try_number}"
+        print(f"{message}")
+        
+        result = ti.xcom_pull(task_ids="Check_package_balance", key="return_value")
+        df_paymentstatus_Y = result["df_paymentstatus_Y"]
+    
+
+        df = pd.DataFrame(columns=df_paymentstatus_Y.columns)
+        try:
+            # df = pd.concat([df_has_paid,df_no_paid],ignore_index=True)
+            # print(f"df: {len(df)}")
+            # mask = df["LASTUPDATEDATETIME"] >= df["DUEDATE"]
+            # mask = df["BALANCE"] > 0
+            # df_no_paid = df[mask]
+            # df_has_paid = df[~mask]
+            
+            df_XALL_Y = df_paymentstatus_Y.query("ACTIONCODE == 'XALL' and PAYMENTSTATUS == 'Y'")
+            df_XPOL_Y = df_paymentstatus_Y.query("ACTIONCODE == 'XPOL' and PAYMENTSTATUS == 'Y")
+            
+            formatted_table_df_XALL_Y = df_XALL_Y.to_markdown(index=False)
+            formatted_table_df_XPOL_Y = df_XPOL_Y.to_markdown(index=False)
+            
+            # print(query)
+            print(f"\n{formatted_table_df_XALL_Y}")
+            print(f"\n{formatted_table_df_XPOL_Y}")
+            
+            return {"df_XALL_Y":df_XALL_Y, "df_XPOL_Y":df_XPOL_Y}
+        
         except Exception as e:
             message = f"Fail with task {task_id} \n error : {e}"
             print(f"Check_payment_date : {e}")
