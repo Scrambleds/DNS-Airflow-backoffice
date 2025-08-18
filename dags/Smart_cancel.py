@@ -181,8 +181,64 @@ def Check_action_code(row, df_actionData):
     except Exception as e:
         print(f"Check action code error: {e}")
         raise e
+    
+def check_cancel_CMT21(row):
+    sql = """
+        SELECT a.ACTIONCODE FROM XININSURE.SALEACTION sa
+        JOIN XININSURE."ACTION" a ON sa.ACTIONID = a.ACTIONID
+        WHERE sa.SALEID = :saleid
+            AND sa.ACTIONSTATUS IN ('Y')
+        ORDER BY sa.SEQUENCE
+    """
+    cursor, conn = ConOracle()
+    try:
+        cursor.execute(sql, {"saleid": row["SALEID"].iloc[0]})
+        result = cursor.fetchall()
+        if result:
+            action_codes = [row[0] for row in result]
+            print(f"Action codes of {row["SALEID"].iloc[0]} is : {action_codes}")
+            if not set(['ZCL08','ZCL09','ZCL10','ZCL16']).isdisjoint(action_codes):
+                return 'MK'
+            elif not set(['CMT25']).isdisjoint(action_codes):
+                return 'BR'
+            elif not set(['CMT25']).isdisjoint(action_codes):
+                return 'DL'
+            else:
+                return 'CL'
+        else:
+            raise
+    except Exception as e:
+        print(f"Error checking CMT21: {e}")
+        raise
 
-
+            
+    
+def Get_request_cancel_by(row):
+    try:
+        actionCode = row["ACTIONCODE"]
+        cancelBy = ""
+        if actionCode == "CMTEL":
+            cancelBy = 'ESY'
+        elif actionCode == "CMT21":
+            cancelBy = check_cancel_CMT21(row)
+        elif actionCode in ["CMT21.1"]:
+            cancelBy = 'COMP'
+        elif actionCode in ["CMT32", "CMT32.01", "CMT33"]:
+            cancelBy = 'BR'
+        elif actionCode in ["CMT34","CMT34.01","CMT35", "CMT35.01"]:
+            cancelBy = 'DL'
+        elif actionCode in ["CMT36","CMT36.01","CMT37"]:
+            cancelBy = 'CM'
+        elif actionCode in ["CMT90"]:
+            cancelBy = 'MK'
+        elif actionCode in ["CMT91"]:
+            cancelBy = 'OP'
+        elif actionCode in ["CMT92","CMT92.1","CMT92.2","CMT92.3","CMT92.4"]:
+            cancelBy = 'COS'
+        return cancelBy
+    except Exception as e:
+        print(f"Get request cancel by error: {e}")
+        raise e
     
 # Default arguments
 default_args = {
@@ -748,6 +804,127 @@ with DAG(
             message = f"Fail with task {task_id} \n error : {e}"
             print(f"Check_payment_date : {e}")
             pass
+
+    def Set_result_cancel(df = pd.DataFrame(), isBefore3PM = False):
+        cursor, conn = ConOracle()
+        
+        if df is None or df.empty:
+            print("Failed to get data.")
+            cursor.close()
+            conn.close()
+            return None
+        
+        field_cond = ""
+        var_cond = {}
+        extra_cond = {}
+
+        sql = """
+                UPDATE
+                    XININSURE.SALE
+                SET
+                    {0}
+                WHERE
+                    X.SALEID = :saleid
+            """
+        # action_status = "X"
+        # request_remark = "Auto Cancel MT สินเชื่อ ESY อนุมัติแล้วไม่สามารถยกเลิกได้ รบกวนตรวจสอบค่ะ"
+        try:
+
+            for index, row in df.iterrows():
+                print("Fetching data...")
+                cancel_by = Get_request_cancel_by(row)
+                remark = ""
+                
+                if row["ACTIONREMARK"] is not None:
+                    remark = row["ACTIONREMARK"]
+                if row["ACTIONREMARK"] is None and row["REQUESTREMARK"] is not None:
+                    remark = row["REQUESTREMARK"]
+                if row['RESULTCODE'].iloc[0] in ['XPOL']:
+                    field_cond = """
+                        CANCELDATE = :cancel_date,
+                        CACELRESULTID = :resultid,
+                        OTHERCANCEL = :remark,
+                        CANCELREQUESTBY = :cancel_by
+                    """
+                elif row['RESULTCODE'].iloc[0] in ['XPRB']:
+                    field_cond = """
+                        CANCELDATE = :cancel_date,
+                        PRBCANCELRESULTID = :resultid,
+                        OTHERCANCELPRB = :remark,
+                        CANCELREQUESTBY = :cancel_by
+                    """
+                elif row['RESULTCODE'].iloc[0] in ['XALL']:
+                    field_cond = """
+                        CANCELDATE = :cancel_date,
+                        CACELRESULTID = :resultid,
+                        OTHERCANCEL = :remark,
+                        PRBCANCELDATE = :cancel_date,
+                        PRBCANCELRESULTID = :resultid,
+                        OTHERCANCELPRB = :remark,
+                        CANCELREQUESTBY = :cancel_by
+                    """
+                var_cond = {
+                    "cancel_date" : "TRUNC(SYSDATE)" if isBefore3PM else "TRUNC(SYSDATE) + INTERVAL '1' DAY",
+                    "resultid" : row["RESULTID"].iloc[0],
+                    "remark" : remark,
+                    "cancel_by" : cancel_by
+                }
+                cursor.execute(sql.format(field_cond), {
+                    "saleid": row["SALEID"],
+                    **var_cond
+                })
+
+            formatted_table = df.to_markdown(index=False)
+            # print(query)
+            print(f"\n{formatted_table}")
+            print(f"Get data successfully")
+            print(f"df: {len(df)}")
+
+            conn.commit() 
+            return { 'Set_action_code': df }
+        
+        except Exception as e:
+            print(f"Exception : {e}")
+        finally:
+            cursor.close()
+            conn.close()
+
+    def Set_sale_action_status(df = pd.DataFrame()):
+        cursor, conn = ConOracle()
+        
+        if df is None or df.empty:
+            print("Failed to get data.")
+            cursor.close()
+            conn.close()
+            return None
+
+        sql = """
+                UPDATE
+                    XININSURE.SALEACTION
+                SET
+                    ACTIONSTATUS = 'Y'
+                WHERE
+                    SALEID = :saleid
+                    AND ACTIONSTATUS NOT IN ('Y')
+                    AND "SEQUENCE" = :seq
+            """
+
+        try:
+
+            for index, row in df.iterrows():
+                cursor.execute(sql, {
+                    "saleid": row["SALEID"],
+                    "seq": row["SEQUENCE"]
+                })
+
+            conn.commit() 
+            return { 'Set_action_code': df }
+        
+        except Exception as e:
+            print(f"Exception : {e}")
+        finally:
+            cursor.close()
+            conn.close()
 
     # @task #ตั้ง default ไปก่อนกัน error แก้ทีหลัง
     def Set_action_code(action_status = "X", request_remark = "Auto Cancel MT สินเชื่อ ESY อนุมัติแล้วไม่สามารถยกเลิกได้ รบกวนตรวจสอบค่ะ", df = pd.DataFrame()):
