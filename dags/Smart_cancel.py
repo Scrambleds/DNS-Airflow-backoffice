@@ -638,7 +638,11 @@ with DAG(
             print(f"Total records found: {len(df)}")
             print(f"Total SALEIDs checked: {len(df)}")
             print(f"Total is esy no_result_code = {df_filter_esy_noresultcode}")
+            
+            #นำไปใช้ใน Module 3
             print(f"Total is esy has_result_code = {df_filter_esy_resultcode}")
+            
+            #นำไปใช้งานในเงื่อนไข B
             print(f"Total not esy no_result_code = {df_filter_notesy_noresultcode}")
             print(f"Total not esy has_result_code = {df_filter_notesy_resultcode}")
             
@@ -718,7 +722,7 @@ with DAG(
             df = pd.concat([df_esy_result,df_esy_noresult],ignore_index=True)
             print(f"df: {len(df)}")
             # mask = df["LASTUPDATEDATETIME"] >= df["DUEDATE"]
-            mask = df["PAIDAMOUNT"] > 0
+            mask = df.query("PAYMENTSTATUS == 'W'")
             df_no_paid = df[mask]
             df_has_paid = df[~mask]
             
@@ -727,6 +731,7 @@ with DAG(
             message = f"Fail with task {task_id} \n error : {e}"
             print(f"Check_payment_date : {e}")
             pass
+        
         
     @task
     def Check_package_balance(**kwargs):
@@ -741,6 +746,9 @@ with DAG(
         
         result = ti.xcom_pull(task_ids="Check_balance", key="return_value")
         df_no_paid = result["df_no_paid"]
+        
+        result = ti.xcom_pull(task_ids="Select_esy02_X", key="return_value")
+        df_filter_notesy_noresultcode = result["df_filter_notesy_noresultcode"]
 
         df = pd.DataFrame(columns=df_has_paid.columns)
         try:
@@ -751,8 +759,9 @@ with DAG(
             # df_no_paid = df[mask]
             # df_has_paid = df[~mask]
             
-            df_paymentstatus_Y = df_has_paid.query("BALANCE == 0 and PAYMENTSTATUS == 'Y'")
-            df_paymentstatus_not_Y = df_no_paid.query("BALANCE >= 0 and PAYMENTSTATUS not in 'Y")
+            df_paymentstatus_Y = df_has_paid.query("PAYMENTSTATUS == 'Y'")
+            df_paymentstatus_not_Y = df_no_paid.query("PAYMENTSTATUS not in 'Y")
+            
             formatted_table_df_paymentstatus_Y = df_paymentstatus_Y.to_markdown(index=False)
             formatted_table_df_paymentstatus_not_Y = df_paymentstatus_not_Y.to_markdown(index=False)
             
@@ -777,26 +786,61 @@ with DAG(
         
         result = ti.xcom_pull(task_ids="Check_package_balance", key="return_value")
         df_paymentstatus_Y = result["df_paymentstatus_Y"]
-    
+        
+        result = ti.xcom_pull(task_ids="Check_balance", key="return_value")
+        df_no_paid = result["df_no_paid"]
+        
+        result = ti.xcom_pull(task_ids="df_has_paid", key="return_value")
+        df_has_paid = result["df_has_paid"]
+        
+        result = ti.xcom_pull(task_ids="Select_esy02_X", key="return_value")
+        df_filter_notesy_noresultcode = result["df_filter_notesy_noresultcode"]
 
-        df = pd.DataFrame(columns=df_paymentstatus_Y.columns)
+        # df = pd.DataFrame(columns=df_paymentstatus_Y.columns)
         try:
-            # df = pd.concat([df_has_paid,df_no_paid],ignore_index=True)
-            # print(f"df: {len(df)}")
-            # mask = df["LASTUPDATEDATETIME"] >= df["DUEDATE"]
-            # mask = df["BALANCE"] > 0
-            # df_no_paid = df[mask]
-            # df_has_paid = df[~mask]
             
-            df_XALL_Y = df_paymentstatus_Y.query("ACTIONCODE == 'XALL' and PAYMENTSTATUS == 'Y'")
-            df_XPOL_Y = df_paymentstatus_Y.query("ACTIONCODE == 'XPOL' and PAYMENTSTATUS == 'Y")
+            #ไม่มียอดชำระ ชำระครบ ไม่เป็นงาน esy และมี resultcode เป็น (XALL, XPOL, XPRB)
+            df_XALL_Y = df_paymentstatus_Y.query("ACTIONCODE == 'XALL'")
+            df_XPOL_Y = df_paymentstatus_Y.query("ACTIONCODE == 'XPOL'")
             
+            #resultcode เป็น XPRB และ ไม่มียอดรับชำระ
+            df_XPRB_W = df_no_paid.query("ACTIONCODE == 'XPRB'")
+            
+            #มียอดชำระและมี resultcode เป็น (XALL, XPOL, XPRB)
+            df_has_paid_XALL = df_has_paid.query("ACTIONCODE == 'XALL'")
+            df_has_paid_XPOL = df_has_paid.query("ACTIONCODE == 'XPOL'")
+            df_has_paid_XPRB = df_has_paid.query("ACTIONCODE == 'XPRB'")
+            df_concat_resultcode_has_paid = pd.concat([df_has_paid_XALL,df_has_paid_XPOL,df_has_paid_XPRB],ignore_index=True)
+                        
+             #resultcode เป็น XPRB และมีหมายเลขกรมธรรม์
+            df_XPRB_has_policynumber = df_XPRB_W[df_XPRB_W["PRBPOLICYNUMBER"].notnull()]
+            
+            #resultcode เป็น XPRB และไม่มีหมายเลขกรมธรรม์
+            df_XPRB_no_policynumber = df_XPRB_W[df_XPRB_W["PRBPOLICYNUMBER"].isnull()]
+            
+            #เตรียมนำไปกรองข้อมูลเฉพาะ return date
+            df_concat_resultcode_has_returndate = pd.concat([df_XALL_Y,df_XPOL_Y,df_XPRB_no_policynumber],ignore_index=True)
+
+            #กรองข้อมูลที่มีค่า return date
+            df_concat_resultcode_has_returndate = df_concat_resultcode_has_returndate[df_concat_resultcode_has_returndate["RETURNDATE"].notnull]
+            
+            #กรองข้อมูลที่ไม่มีค่า return date
+            df_concat_resultcode_no_returndate = df_concat_resultcode_has_returndate[df_concat_resultcode_has_returndate["RETURNDATE"].isnull]
+
             formatted_table_df_XALL_Y = df_XALL_Y.to_markdown(index=False)
             formatted_table_df_XPOL_Y = df_XPOL_Y.to_markdown(index=False)
+            formatted_table_df_XPRB_has_policynumber = df_XPRB_has_policynumber.to_markdown(index=False)
+            formatted_table_df_XPRB_no_policynumber = df_XPRB_no_policynumber.to_markdown(index=False)
+            formatted_table_df_filter_notesy_noresultcode = df_filter_notesy_noresultcode.to_markdown(index=False)
+            formatted_table_df_concat_resultcode_has_paid = df_concat_resultcode_has_paid.to_markdown(index=False)
             
             # print(query)
             print(f"\n{formatted_table_df_XALL_Y}")
             print(f"\n{formatted_table_df_XPOL_Y}")
+            print(f"\n{formatted_table_df_XPRB_has_policynumber}")
+            print(f"\n{formatted_table_df_XPRB_no_policynumber}")
+            print(f"\n{formatted_table_df_filter_notesy_noresultcode}")
+            print(f"\n{formatted_table_df_concat_resultcode_has_paid}")
             
             return {"df_XALL_Y":df_XALL_Y, "df_XPOL_Y":df_XPOL_Y}
         
