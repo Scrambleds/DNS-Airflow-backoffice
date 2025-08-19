@@ -354,10 +354,10 @@ with DAG(
                             AND i.receiveid = r.receiveid
                             AND r.receivestatus IN ('S', 'C')
                             -- AND i.RECEIVEDATE = TRUNC(SYSDATE)
-                                AND i.RECEIVEDATE >= TO_DATE('20/07/2024', 'DD/MM/YYYY')
-                                    AND i.RECEIVEDATE <= TO_DATE('30/07/2024', 'DD/MM/YYYY')
-                                    -- and i.receivebookcode not  in('R01','R03','R02','R04')
-                                        AND T.SALEID = SSA.SALEID ) AS PAIDCURRENTDATE,
+                            AND i.RECEIVEDATE >= TO_DATE('20/07/2024', 'DD/MM/YYYY')
+                            AND i.RECEIVEDATE <= TO_DATE('30/07/2024', 'DD/MM/YYYY')
+                            -- and i.receivebookcode not  in('R01','R03','R02','R04')
+                            AND T.SALEID = SSA.SALEID ) AS PAIDCURRENTDATE,
                         PT.PRODUCTGROUP,
                         PT.PRODUCTTYPE
                     FROM
@@ -407,7 +407,7 @@ with DAG(
                         AND B.BRANCHID = R.BRANCHID
                         AND ST.SALEID = S.SALEID
                         -- AND PT.PRODUCTGROUP = 'MT'
-                    --	AND SU.SUPPLIERCODE IN ('KWIL', 'AIA', 'SSL', 'BKI', 'BLA', 'VY', 'DHP', 'TVI', 'MTI', 'MTL', 'MLI', 'ALIFE', 'FWD', 'KTAL', 'ACE', 'SELIC', 'PLA', 'TSLI', 'ESY')
+                        -- AND SU.SUPPLIERCODE IN ('KWIL', 'AIA', 'SSL', 'BKI', 'BLA', 'VY', 'DHP', 'TVI', 'MTI', 'MTL', 'MLI', 'ALIFE', 'FWD', 'KTAL', 'ACE', 'SELIC', 'PLA', 'TSLI', 'ESY')
                         --อนุมัติ
                         AND S.PLATEID IS NULL
                         AND S.CANCELDATE IS NULL
