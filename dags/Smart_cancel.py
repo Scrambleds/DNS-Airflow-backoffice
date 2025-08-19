@@ -777,7 +777,7 @@ with DAG(
             pass
         
     @task
-    def Check_return_date(**kwargs):
+    def Split_segment_condition(**kwargs):
         ti = kwargs["ti"]
         task_id = kwargs['task_instance'].task_id
         try_number = kwargs['task_instance'].try_number
@@ -884,7 +884,7 @@ with DAG(
         message = f"Processing task {task_id} ,try_number {try_number}"
         print(f"{message}")
         
-        result = ti.xcom_pull(task_ids="Check_return_date", key="return_value")
+        result = ti.xcom_pull(task_ids="Split_segment_condition", key="return_value")
         df_concat_resultcode_has_paid = result["df_concat_resultcode_has_paid"]
         
         try:
