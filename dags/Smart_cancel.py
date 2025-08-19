@@ -842,8 +842,6 @@ with DAG(
             print(f"\n{formatted_table_df_filter_notesy_noresultcode}")
             print(f"\n{formatted_table_df_concat_resultcode_has_paid}")
             
-            
-            
             return {"df_concat_resultcode_has_returndate":df_concat_resultcode_has_returndate,
                     "df_concat_resultcode_no_returndate":df_concat_resultcode_no_returndate, 
                     "df_XPRB_has_policynumber": df_XPRB_has_policynumber,
