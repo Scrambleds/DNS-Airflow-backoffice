@@ -666,8 +666,8 @@ with DAG(
             print(f"df: {len(df)}")
 
             mask = df["PAIDCURRENTDATE"] > 0 if not df.empty and "PAIDCURRENTDATE" in df.columns else pd.Series(dtype=bool)
-            df_no_paid = df[mask] if not df.empty else empty_df_result
-            df_has_paid = df[~mask] if not df.empty else empty_df_result
+            df_has_paid = df[mask] if not df.empty else empty_df_result
+            df_no_paid = df[~mask] if not df.empty else empty_df_result
             
             return {"df_has_paid":df_has_paid,"df_no_paid":df_no_paid}
         
