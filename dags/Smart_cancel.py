@@ -445,7 +445,7 @@ with DAG(
     @task
     def Insert_digital_DM(**kwargs):
         ti = kwargs["ti"]
-        result = ti.xcom_pull(task_ids="Get_cancelled_work", key="return_value")
+        result = ti.xcom_pull(task_ids="get_cancellation_group.Get_cancelled_work", key="return_value")
 
         df = result.get("df_digital_room", pd.DataFrame())
         
@@ -507,7 +507,7 @@ with DAG(
         cursor, conn = ConOracle()
         
         ti = kwargs["ti"]
-        result = ti.xcom_pull(task_ids="Get_cancelled_work", key="return_value")
+        result = ti.xcom_pull(task_ids="get_cancellation_group.Get_cancelled_work", key="return_value")
         
         df = result.get("df_cancel_work", pd.DataFrame())
         
@@ -1006,127 +1006,6 @@ with DAG(
         finally:
             cursor.close()
             conn.close()
-            
-    # ตั้งโค๊ด C21 กรณีชำระหลังมีการตั้ง Code ยกเลิกไปแล้ว และ เป็นศูนย์ประสานงาน
-    # def Insert_C21_Routes_deadline(**kwargs):
-    #         ti = kwargs["ti"]
-    #         result = ti.xcom_pull(task_ids="Process_x.Split_actioncode_dl", key="return_value")
-
-    #         df = result.get("df_Routes", pd.DataFrame())
-
-    #         cursor, conn = ConOracle()
-    #         if cursor is None or conn is None:
-    #             return None
-
-            
-
-    #         try:
-    #             if df.empty:
-    #                 print("DataFrame is empty. Exiting task.")
-    #                 return df
-    #             else:
-    #                 # Define region codes
-    #                 region_codes = {
-    #                     "ภาคเหนือ": [
-    #                         "005", "017", "023", "026", "033", "034", "035", "052", "053",
-    #                         "065", "075", "013", "014", "036", "038", "044"
-    #                     ],
-    #                     "ภาคใต้": [
-    #                         "002", "012", "016", "022", "025", "031", "039", "040", "041",
-    #                         "045", "048", "057", "058", "067"
-    #                     ],
-    #                     "ภาคตะวันออกเฉียงเหนือ": [
-    #                         "004", "006", "011", "020", "021", "079", "027", "043", "042",
-    #                         "046", "047", "055", "056", "068", "069", "070", "076", "074",
-    #                         "072", "054"
-    #                     ],
-    #                     "ภาคกลาง": [
-    #                         "001", "024", "028", "003", "007", "008", "009", "010", "015",
-    #                         "018", "019", "029", "030", "032", "049", "050", "051", "060",
-    #                         "059", "061", "063", "062", "064", "066", "073", "071", "037"
-    #                     ]
-    #                 }
-
-    #                 i = 0
-    #                 for index, row in df.iterrows():
-    #                     action_code_insert = None
-    #                     request_remark = "ลูกค้าชําระเข้ามาหลังตั้งโค้ดยกเลิกรบกวนสรุปงานหากต้องการยกเลิกให้ตั้งโค้ดยกเลิกอีกครั้ง"
-    #                     action_status_update = "W"
-
-    #                     if row["PROVINCECODE"] in region_codes["ภาคเหนือ"]:
-    #                         cursor.execute("""SELECT ACTIONID FROM XININSURE.ACTION WHERE ACTIONCODE = 'ZBR01'""")
-    #                         action_code_insert = cursor.fetchone()[0]
-
-    #                     elif row["PROVINCECODE"] in region_codes["ภาคใต้"]:
-    #                         cursor.execute("""SELECT ACTIONID FROM XININSURE.ACTION WHERE ACTIONCODE = 'ZBR02'""")
-    #                         action_code_insert = cursor.fetchone()[0]
-
-    #                     elif row["PROVINCECODE"] in region_codes["ภาคตะวันออกเฉียงเหนือ"]:
-    #                         cursor.execute("""SELECT ACTIONID FROM XININSURE.ACTION WHERE ACTIONCODE = 'ZBR03'""")
-    #                         action_code_insert = cursor.fetchone()[0]
-
-    #                     elif row["PROVINCECODE"] in region_codes["ภาคกลาง"]:
-    #                         cursor.execute("""SELECT ACTIONID FROM XININSURE.ACTION WHERE ACTIONCODE = 'ZBR04'""")
-    #                         action_code_insert = cursor.fetchone()[0]
-
-    #                     if action_code_insert:
-    #                         insert_action_query = """
-    #                         INSERT INTO XININSURE.SALEACTION(SALEID, SEQUENCE, ACTIONID, ACTIONSTATUS, DUEDATE, REQUESTREMARK, ACTIONREMARK)
-    #                         SELECT X.SALEID,
-    #                             NVL((SELECT MAX(SEQUENCE) FROM XININSURE.SALEACTION WHERE SALEID = :saleid), 0) + 1,
-    #                             :actionid,
-    #                             :actionstatus,
-    #                             TRUNC(SYSDATE) + 1,
-    #                             :request_remark,  -- Static value for requestremark
-    #                             ''  -- Use the dynamically set actionremark
-    #                         FROM XININSURE.SALE X
-    #                         WHERE X.SALEID = :saleid
-    #                         """
-    #                         cursor.execute(insert_action_query, {
-    #                             "saleid": row["SALEID"],
-    #                             "actionid": action_code_insert,
-    #                             "actionstatus": action_status_update,
-    #                             "request_remark": request_remark,
-    #                         })
-    #                         print(f"Insert {i+1}: SALEID={row['SALEID']}, ACTIONID={action_code_insert}")
-    #                         i += 1
-
-    #                 #conn.commit() 
-    #                 return df
-
-    #         except oracledb.Error as error:
-    #             print(f"OracleDB Error: {error}")
-    #             conn.rollback()
-    #             return None
-
-    #         finally:
-    #             cursor.close()
-    #             conn.close()
-                
-                
-    # @task
-    # def insert_task_deadline(**kwargs):
-
-    #     task_id = kwargs['task_instance'].task_id
-    #     try_number = kwargs['task_instance'].try_number
-    #     message = f"Processing task {task_id} ,try_number {try_number}"
-    #     print(f"{message}")
-    #     try:
-    #         # เรียกใช้ฟังก์ชัน Insert_M13_deadline
-    #         print("Running Insert_M13_deadline...")
-    #         df_C21 = Insert_C21_Routes_deadline(**kwargs)
-    #         if df_C21 is not None:
-    #             print(f"Insert_C21_Routes_deadline {len(df_C21)} records.")
-
-
-    #         print("All tasks completed successfully.")
-    #         # print (f'{"SUM insert deadline",(len(df_C21))}')
-    #         return True
-
-    #     except Exception as e:
-    #         message = f"Fail with task {task_id} \n error : {e}"
-    #         print(f"Error in insert_task_deadline: {e}")
-    #         return None
 
     #Dummy
     start = EmptyOperator(task_id="start_dag", trigger_rule="none_failed_min_one_success")
