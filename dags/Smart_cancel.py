@@ -819,13 +819,13 @@ with DAG(
             df_XPRB_no_policynumber = df_XPRB_W[df_XPRB_W["PRBPOLICYNUMBER"].isnull()]
             
             #เตรียมนำไปกรองข้อมูลเฉพาะ return date
-            df_concat_resultcode_has_returndate = pd.concat([df_XALL_Y,df_XPOL_Y,df_XPRB_no_policynumber],ignore_index=True)
+            df_concat_resultcode = pd.concat([df_XALL_Y,df_XPOL_Y,df_XPRB_no_policynumber],ignore_index=True)
 
             #กรองข้อมูลที่มีค่า return date
-            df_concat_resultcode_has_returndate = df_concat_resultcode_has_returndate[df_concat_resultcode_has_returndate["RETURNDATE"].notnull]
+            df_concat_resultcode_has_returndate = df_concat_resultcode[df_concat_resultcode["RETURNDATE"].notnull]
             
             #กรองข้อมูลที่ไม่มีค่า return date
-            df_concat_resultcode_no_returndate = df_concat_resultcode_has_returndate[df_concat_resultcode_has_returndate["RETURNDATE"].isnull]
+            df_concat_resultcode_no_returndate = df_concat_resultcode[df_concat_resultcode["RETURNDATE"].isnull]
 
             formatted_table_df_XALL_Y = df_XALL_Y.to_markdown(index=False)
             formatted_table_df_XPOL_Y = df_XPOL_Y.to_markdown(index=False)
@@ -842,7 +842,55 @@ with DAG(
             print(f"\n{formatted_table_df_filter_notesy_noresultcode}")
             print(f"\n{formatted_table_df_concat_resultcode_has_paid}")
             
-            return {"df_XALL_Y":df_XALL_Y, "df_XPOL_Y":df_XPOL_Y}
+            
+            
+            return {"df_concat_resultcode_has_returndate":df_concat_resultcode_has_returndate,
+                    "df_concat_resultcode_no_returndate":df_concat_resultcode_no_returndate, 
+                    "df_XPRB_has_policynumber": df_XPRB_has_policynumber,
+                    "df_XPRB_no_policynumber": df_XPRB_no_policynumber,
+                    "df_concat_resultcode_has_paid": df_concat_resultcode_has_paid}
+        
+        except Exception as e:
+            message = f"Fail with task {task_id} \n error : {e}"
+            print(f"Check_payment_date : {e}")
+            pass
+        
+    @task
+    def Condition_B(**kwargs):
+        ti = kwargs["ti"]
+        task_id = kwargs['task_instance'].task_id
+        try_number = kwargs['task_instance'].try_number
+        message = f"Processing task {task_id} ,try_number {try_number}"
+        print(f"{message}")
+        
+        result = ti.xcom_pull(task_ids="Select_esy02_X", key="return_value")
+        df_filter_notesy_noresultcode = result["df_filter_notesy_noresultcode"]
+        
+        try:
+            # df_filter_notesy_noresultcode
+            
+            return True
+        
+        except Exception as e:
+            message = f"Fail with task {task_id} \n error : {e}"
+            print(f"Check_payment_date : {e}")
+            pass
+            
+    @task
+    def Condition_C(**kwargs):
+        ti = kwargs["ti"]
+        task_id = kwargs['task_instance'].task_id
+        try_number = kwargs['task_instance'].try_number
+        message = f"Processing task {task_id} ,try_number {try_number}"
+        print(f"{message}")
+        
+        result = ti.xcom_pull(task_ids="Check_return_date", key="return_value")
+        df_concat_resultcode_has_paid = result["df_concat_resultcode_has_paid"]
+        
+        try:
+            # df_concat_resultcode_has_paid
+            
+            return True
         
         except Exception as e:
             message = f"Fail with task {task_id} \n error : {e}"
