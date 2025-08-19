@@ -609,7 +609,7 @@ with DAG(
     @task
     def process_esy_no_result_code(**kwargs):
         ti = kwargs["ti"]
-        result = ti.xcom_pull(task_ids="Select_esy02_X", key="return_value")
+        result = ti.xcom_pull(task_ids="get_cancellation_group.Select_esy02_X", key="return_value")
         df = result.get("df_filter_esy_noresultcode", pd.DataFrame()) # easy no result code
 
         if df.empty:
@@ -629,7 +629,7 @@ with DAG(
     @task
     def process_not_esy_no_result_code(**kwargs):
         ti = kwargs["ti"]
-        result = ti.xcom_pull(task_ids="Select_esy02_X", key="return_value")
+        result = ti.xcom_pull(task_ids="get_cancellation_group.Select_esy02_X", key="return_value")
         df = result.get("df_filter_notesy_noresultcode", pd.DataFrame()) # not easy no result code
 
         if df.empty:
@@ -654,34 +654,27 @@ with DAG(
         message = f"Processing task {task_id} ,try_number {try_number}"
         print(f"{message}")
         
-        result = ti.xcom_pull(task_ids="Select_esy02_X", key="return_value")
-        df_esy_result = result["df_filter_esy_resultcode"]
+        result = ti.xcom_pull(task_ids="get_cancellation_group.Select_esy02_X", key="return_value")
+        df = result.get("df_filter_esy_resultcode", pd.DataFrame())
+        # df_esy_noresult = result.get("df_filter_esy_noresultcode", pd.DataFrame())
         
-        result = ti.xcom_pull(task_ids="Select_esy02_X", key="return_value")
-        df_esy_noresult = result["df_filter_esy_noresultcode"]
-
-        df = pd.DataFrame(columns=df_esy_result.columns)
+        empty_df_result = pd.DataFrame(columns=df.columns) if df is not None and not df.empty else pd.DataFrame()
+        # empty_df_noresult = pd.DataFrame(columns=df_esy_noresult.columns) if df_esy_noresult is not None and not df_esy_noresult.empty else pd.DataFrame()
+        
         try:
-            df = pd.concat([df_esy_result,df_esy_noresult],ignore_index=True)
+            # df = pd.concat([df_esy_result, df_esy_noresult], ignore_index=True)
             print(f"df: {len(df)}")
-            
-            # mask = df["LASTUPDATEDATETIME"] == df["DUEDATE"]
-            
-            #ตรวจสอบว่ามีรับชำระมาในวันหรือไม่)
-            
-            mask = df["PAIDCURRENTDATE"] > 0
 
-            # mask = df.query("PAYMENTSTATUS == 'W'")
-            
-            df_no_paid = df[mask]
-            df_has_paid = df[~mask]
+            mask = df["PAIDCURRENTDATE"] > 0 if not df.empty and "PAIDCURRENTDATE" in df.columns else pd.Series(dtype=bool)
+            df_no_paid = df[mask] if not df.empty else empty_df_result
+            df_has_paid = df[~mask] if not df.empty else empty_df_result
             
             return {"df_has_paid":df_has_paid,"df_no_paid":df_no_paid}
+        
         except Exception as e:
             message = f"Fail with task {task_id} \n error : {e}"
             print(f"Check_payment_date : {e}")
             pass
-        
         
     @task
     def Check_package_balance(**kwargs):
@@ -691,17 +684,18 @@ with DAG(
         message = f"Processing task {task_id} ,try_number {try_number}"
         print(f"{message}")
         
-        result = ti.xcom_pull(task_ids="Check_balance", key="return_value")
+        result = ti.xcom_pull(task_ids="get_cancellation_group.Check_balance", key="return_value")
         df_has_paid = result["df_has_paid"]
         
-        result = ti.xcom_pull(task_ids="Check_balance", key="return_value")
+        result = ti.xcom_pull(task_ids="get_cancellation_group.Check_balance", key="return_value")
         df_no_paid = result["df_no_paid"]
-
-        # df = pd.DataFrame(columns=df_has_paid.columns)
+        
+        empty_df_has_paid = pd.DataFrame(columns=df_has_paid.columns) if df_has_paid is not None and not df_has_paid.empty else pd.DataFrame()
+        empty_df_no_paid = pd.DataFrame(columns=df_no_paid.columns) if df_no_paid is not None and not df_no_paid.empty else pd.DataFrame()
         try:
             
-            df_paymentstatus_Y = df_has_paid.query("PAYMENTSTATUS == 'Y'")
-            df_paymentstatus_not_Y = df_no_paid.query("PAYMENTSTATUS not in 'Y")
+            df_paymentstatus_Y = df_has_paid.query("PAYMENTSTATUS == 'Y'") if df_has_paid is not None and not df_has_paid.empty else empty_df_has_paid
+            df_paymentstatus_not_Y = df_no_paid.query("PAYMENTSTATUS not in 'Y'") if df_no_paid is not None and not df_no_paid.empty else empty_df_no_paid
             
             formatted_table_df_paymentstatus_Y = df_paymentstatus_Y.to_markdown(index=False)
             formatted_table_df_paymentstatus_not_Y = df_paymentstatus_not_Y.to_markdown(index=False)
@@ -725,74 +719,56 @@ with DAG(
         message = f"Processing task {task_id} ,try_number {try_number}"
         print(f"{message}")
         
-        result = ti.xcom_pull(task_ids="Check_package_balance", key="return_value")
+        result = ti.xcom_pull(task_ids="get_cancellation_group.Check_package_balance", key="return_value")
         df_paymentstatus_Y = result["df_paymentstatus_Y"]
         
-        result = ti.xcom_pull(task_ids="Check_balance", key="return_value")
+        result = ti.xcom_pull(task_ids="get_cancellation_group.Check_balance", key="return_value")
         df_no_paid = result["df_no_paid"]
         
-        result = ti.xcom_pull(task_ids="df_has_paid", key="return_value")
+        result = ti.xcom_pull(task_ids="get_cancellation_group.Check_balance", key="return_value")
         df_has_paid = result["df_has_paid"]
         
-        result = ti.xcom_pull(task_ids="Select_esy02_X", key="return_value")
+        result = ti.xcom_pull(task_ids="get_cancellation_group.Select_esy02_X", key="return_value")
         df_filter_notesy_noresultcode = result["df_filter_notesy_noresultcode"]
 
-        # df = pd.DataFrame(columns=df_paymentstatus_Y.columns)
         try:
+            # ไม่มียอดชำระ ชำระครบ ไม่เป็นงาน esy และมี resultcode เป็น (XALL, XPOL, XPRB)
+            df_XALL_Y = df_paymentstatus_Y.query("ACTIONCODE == 'XALL'") if df_paymentstatus_Y is not None and not df_paymentstatus_Y.empty else pd.DataFrame()
+            df_XPOL_Y = df_paymentstatus_Y.query("ACTIONCODE == 'XPOL'") if df_paymentstatus_Y is not None and not df_paymentstatus_Y.empty else pd.DataFrame()
             
-            #ไม่มียอดชำระ ชำระครบ ไม่เป็นงาน esy และมี resultcode เป็น (XALL, XPOL, XPRB)
-            df_XALL_Y = df_paymentstatus_Y.query("ACTIONCODE == 'XALL'")
-            df_XPOL_Y = df_paymentstatus_Y.query("ACTIONCODE == 'XPOL'")
+            # resultcode เป็น XPRB และ ไม่มียอดรับชำระ
+            df_XPRB_W = df_no_paid.query("ACTIONCODE == 'XPRB'") if df_no_paid is not None and not df_no_paid.empty else pd.DataFrame()
             
-            #resultcode เป็น XPRB และ ไม่มียอดรับชำระ
-            df_XPRB_W = df_no_paid.query("ACTIONCODE == 'XPRB'")
-            
-            #มียอดชำระและมี resultcode เป็น (XALL, XPOL, XPRB)
-            df_has_paid_XALL = df_has_paid.query("ACTIONCODE == 'XALL'")
-            df_has_paid_XPOL = df_has_paid.query("ACTIONCODE == 'XPOL'")
-            df_has_paid_XPRB = df_has_paid.query("ACTIONCODE == 'XPRB'")
-            df_concat_resultcode_has_paid = pd.concat([df_has_paid_XALL,df_has_paid_XPOL,df_has_paid_XPRB],ignore_index=True)
+            # มียอดชำระและมี resultcode เป็น (XALL, XPOL, XPRB)
+            df_has_paid_XALL = df_has_paid.query("ACTIONCODE == 'XALL'") if df_has_paid is not None and not df_has_paid.empty else pd.DataFrame()
+            df_has_paid_XPOL = df_has_paid.query("ACTIONCODE == 'XPOL'") if df_has_paid is not None and not df_has_paid.empty else pd.DataFrame()
+            df_has_paid_XPRB = df_has_paid.query("ACTIONCODE == 'XPRB'") if df_has_paid is not None and not df_has_paid.empty else pd.DataFrame()
+            df_concat_resultcode_has_paid = pd.concat([df_has_paid_XALL, df_has_paid_XPOL, df_has_paid_XPRB], ignore_index=True) if not (df_has_paid_XALL.empty and df_has_paid_XPOL.empty and df_has_paid_XPRB.empty) else pd.DataFrame()
                         
-             #resultcode เป็น XPRB และมีหมายเลขกรมธรรม์
-            df_XPRB_has_policynumber = df_XPRB_W[df_XPRB_W["PRBPOLICYNUMBER"].notnull()]
+            # resultcode เป็น XPRB และมีหมายเลขกรมธรรม์
+            df_XPRB_has_policynumber = df_XPRB_W[df_XPRB_W["PRBPOLICYNUMBER"].notnull()] if not df_XPRB_W.empty else pd.DataFrame()
             
-            #resultcode เป็น XPRB และไม่มีหมายเลขกรมธรรม์
-            df_XPRB_no_policynumber = df_XPRB_W[df_XPRB_W["PRBPOLICYNUMBER"].isnull()]
+            # resultcode เป็น XPRB และไม่มีหมายเลขกรมธรรม์
+            df_XPRB_no_policynumber = df_XPRB_W[df_XPRB_W["PRBPOLICYNUMBER"].isnull()] if not df_XPRB_W.empty else pd.DataFrame()
             
-            #เตรียมนำไปกรองข้อมูลเฉพาะ return date
-            df_concat_resultcode = pd.concat([df_XALL_Y,df_XPOL_Y,df_XPRB_no_policynumber],ignore_index=True)
+            # เตรียมนำไปกรองข้อมูลเฉพาะ return date
+            df_concat_resultcode = pd.concat([df_XALL_Y, df_XPOL_Y, df_XPRB_no_policynumber], ignore_index=True) if not (df_XALL_Y.empty and df_XPOL_Y.empty and df_XPRB_no_policynumber.empty) else pd.DataFrame()
             
-            mask = df_concat_resultcode[df_concat_resultcode["RETURNDATE"].notnull]
+            mask = df_concat_resultcode["RETURNDATE"].notnull() if not df_concat_resultcode.empty else pd.Series(dtype=bool)
 
-            # mask = df.query("PAYMENTSTATUS == 'W'")
+            # กรองข้อมูลที่มีค่า return date
+            df_concat_resultcode_has_returndate = df_concat_resultcode[mask] if not df_concat_resultcode.empty else pd.DataFrame()
             
-            #กรองข้อมูลที่มีค่า return date
-            df_concat_resultcode_has_returndate = df_concat_resultcode[mask]
-            
-            #กรองข้อมูลที่ไม่มีค่า return date
-            df_concat_resultcode_no_returndate = df_concat_resultcode[~mask]
-        
+            # กรองข้อมูลที่ไม่มีค่า return date
+            df_concat_resultcode_no_returndate = df_concat_resultcode[~mask] if not df_concat_resultcode.empty else pd.DataFrame()
 
-            formatted_table_df_XALL_Y = df_XALL_Y.to_markdown(index=False)
-            formatted_table_df_XPOL_Y = df_XPOL_Y.to_markdown(index=False)
-            formatted_table_df_XPRB_has_policynumber = df_XPRB_has_policynumber.to_markdown(index=False)
-            formatted_table_df_XPRB_no_policynumber = df_XPRB_no_policynumber.to_markdown(index=False)
-            formatted_table_df_filter_notesy_noresultcode = df_filter_notesy_noresultcode.to_markdown(index=False)
-            formatted_table_df_concat_resultcode_has_paid = df_concat_resultcode_has_paid.to_markdown(index=False)
-            
-            # print(query)
-            print(f"\n{formatted_table_df_XALL_Y}")
-            print(f"\n{formatted_table_df_XPOL_Y}")
-            print(f"\n{formatted_table_df_XPRB_has_policynumber}")
-            print(f"\n{formatted_table_df_XPRB_no_policynumber}")
-            print(f"\n{formatted_table_df_filter_notesy_noresultcode}")
-            print(f"\n{formatted_table_df_concat_resultcode_has_paid}")
-            
-            return {"df_concat_resultcode_has_returndate":df_concat_resultcode_has_returndate,
-                    "df_concat_resultcode_no_returndate":df_concat_resultcode_no_returndate, 
-                    "df_XPRB_has_policynumber": df_XPRB_has_policynumber,
-                    "df_XPRB_no_policynumber": df_XPRB_no_policynumber,
-                    "df_concat_resultcode_has_paid": df_concat_resultcode_has_paid}
+            return {
+                "df_concat_resultcode_has_returndate": df_concat_resultcode_has_returndate,
+                "df_concat_resultcode_no_returndate": df_concat_resultcode_no_returndate,
+                "df_XPRB_has_policynumber": df_XPRB_has_policynumber,
+                "df_XPRB_no_policynumber": df_XPRB_no_policynumber,
+                "df_concat_resultcode_has_paid": df_concat_resultcode_has_paid
+            }
         
         except Exception as e:
             message = f"Fail with task {task_id} \n error : {e}"
@@ -807,24 +783,15 @@ with DAG(
         message = f"Processing task {task_id} ,try_number {try_number}"
         print(f"{message}")
         
-        result = ti.xcom_pull(task_ids="Select_esy02_X", key="return_value")
-        df_filter_notesy_noresultcode = result["df_filter_notesy_noresultcode"]
-        
-        # result = ti.xcom_pull(task_ids="Split_segment_condition", key="return_value")
-        # df_concat_resultcode_no_returndate = result['df_concat_resultcode_no_returndate']
+        result = ti.xcom_pull(task_ids="get_cancellation_group.Select_esy02_X", key="return_value")
+        df_filter_notesy_noresultcode = result.get("df_filter_notesy_noresultcode", pd.DataFrame())
         
         try:
-            
-            #ไม่เป็นรหัสผลยกเลิกที่กำหนด เช่น XALL, XPOL, XPRB
-            if df_filter_notesy_noresultcode:
+            # ไม่เป็นรหัสผลยกเลิกที่กำหนด เช่น (XALL, XPOL, XPRB)
+            if df_filter_notesy_noresultcode is not None and not df_filter_notesy_noresultcode.empty:
                 action_status = "W"
                 request_remark = "Auto Cancel MT รหัสผลที่กำหนดไม่ถูกต้อง ไม่สามารถดำเนินการยกเลิกได้ รบกวนตรวจสอบค่ะ"
                 Set_action_code(action_status, request_remark, df_filter_notesy_noresultcode)
-                
-            # elif df_concat_resultcode_no_returndate:
-            #     action_status = "W"
-            #     request_remark = "Auto Cancel MT ระบบไม่สามารถยกเลิกได้ รบกวนตรวจสอบ"
-            #     Set_action_code(action_status, request_remark, df_concat_resultcode_no_returndate)
             
             return True
         
@@ -841,21 +808,19 @@ with DAG(
         message = f"Processing task {task_id} ,try_number {try_number}"
         print(f"{message}")
         
-        result = ti.xcom_pull(task_ids="Split_segment_condition", key="return_value")
-        df_concat_resultcode_has_paid = result["df_concat_resultcode_has_paid"]
-        
-        result = ti.xcom_pull(task_ids="Split_segment_condition", key="return_value")
-        df_concat_resultcode_no_returndate = result['df_concat_resultcode_no_returndate']
+        result = ti.xcom_pull(task_ids="get_cancellation_group.Split_segment_condition", key="return_value")
+        df_concat_resultcode_has_paid = result.get("df_concat_resultcode_has_paid", pd.DataFrame())
+        df_concat_resultcode_no_returndate = result.get("df_concat_resultcode_no_returndate", pd.DataFrame())
         
         try:
             # resultcode ที่อยู่ใน (XALL, XPOL, XPRB) และ มียอดชำระเข้ามาในวัน
-            if df_concat_resultcode_has_paid:
+            if df_concat_resultcode_has_paid is not None and not df_concat_resultcode_has_paid.empty:
                 action_status = "X"
                 request_remark = "Auto Cancel MT พบยอดรับชำระหลังจากตั้งโค้ดยกเลิก หากต้องการยกเลิกรบกวนตั้งโค้ดยกเลิกให้ใหม่อีกครั้ง"
                 Set_action_code(action_status, request_remark, df_concat_resultcode_has_paid)
                 
             # resultcode ที่อยูใน (XALL, XPOL, XPRB) และ ไม่มีค่า Returndate
-            elif df_concat_resultcode_no_returndate:
+            elif df_concat_resultcode_no_returndate is not None and not df_concat_resultcode_no_returndate.empty:
                 action_status = "W"
                 request_remark = "Auto Cancel MT ระบบไม่สามารถยกเลิกได้ รบกวนตรวจสอบ"
                 Set_action_code(action_status, request_remark, df_concat_resultcode_no_returndate)
@@ -1170,6 +1135,7 @@ with DAG(
     work_path = EmptyOperator(task_id="Work_path", trigger_rule="none_failed_min_one_success")
     join_x = EmptyOperator(task_id="join_x_branch", trigger_rule="none_failed_min_one_success")
     join_v = EmptyOperator(task_id="join_v_branch", trigger_rule="none_failed_min_one_success")
+    join_w = EmptyOperator(task_id="join_w_branch", trigger_rule="none_failed_min_one_success")
     # execute_x = EmptyOperator(task_id="execute_x_path", trigger_rule="none_failed_min_one_success")
     execute_v = EmptyOperator(task_id="execute_v_path", trigger_rule="none_failed_min_one_success")
     # process_esy_task = EmptyOperator(task_id="process_esy_task", trigger_rule="none_failed_min_one_success")
@@ -1179,14 +1145,32 @@ with DAG(
     
     #task ที่ไป call function
     check_holiday_task = check_holiday()
-    get_cancellation_work = Get_cancelled_work()
-    # execute_x = Set_action_code() change to function
-    # execute_x = get_esy_no_result_code()
-    process_esy_task = process_esy_no_result_code()
-    process_not_esy_task = process_not_esy_no_result_code()
-    get_esy02_X_task = Select_esy02_X()
-    insert_digital_DM_task = Insert_digital_DM()
     
+    @task_group(group_id="get_cancellation_group")
+    def get_cancellation_group():
+        get_cancelltaion_work = Get_cancelled_work()
+        get_esy02_X_task = Select_esy02_X()
+        insert_digital_DM_task = Insert_digital_DM()
+        Check_balance_task = Check_balance()
+        Check_package_balance_task = Check_package_balance()
+        Split_segment_condition_task = Split_segment_condition()
+        
+        get_cancelltaion_work >> get_esy02_X_task >> insert_digital_DM_task >> Check_balance_task >> Check_package_balance_task >> Split_segment_condition_task
+        
+    @task_group(group_id="process_x_group")
+    def process_x_group():
+        process_esy_task = process_esy_no_result_code()
+        process_not_esy_task = process_not_esy_no_result_code()
+        
+        [process_esy_task, process_not_esy_task]
+
+    @task_group(group_id="condition_group")  
+    def condition_group():
+        condition_c_task = Condition_C()
+        condition_b_task = Condition_B()
+        
+        condition_c_task >> condition_b_task
+        
     #กำหนด workflow
     (
         #เริ่มต้น
@@ -1194,10 +1178,13 @@ with DAG(
         holiday_path >> end,
         
         #ระงับยกเลิกไป join x , ยกเลิกไป join v
-        work_path >> get_cancellation_work >> insert_digital_DM_task >> get_esy02_X_task >> [join_x, join_v],
+        work_path >> get_cancellation_group()
+        >> [join_x, join_v, join_w],
         
         # แทนค่าด้วยฟังก์ชันระงับยกเลิกได้เลย
-        join_x >> [process_esy_task, process_not_esy_task] >> end,
+        join_x >> process_x_group() >> end,
         
         join_v >> execute_v >> end,
+        
+        join_w >> condition_group() >> end,
     )
