@@ -786,13 +786,16 @@ with DAG(
         result = ti.xcom_pull(task_ids="get_cancellation_group.Select_esy02_X", key="return_value")
         df_filter_notesy_noresultcode = result.get("df_filter_notesy_noresultcode", pd.DataFrame())
         
+        formatted_table_df_filter_notesy_noresultcode = df_filter_notesy_noresultcode.to_markdown(index=False)
+        
+        print(f"\n{formatted_table_df_filter_notesy_noresultcode}")
+        
         try:
             # ไม่เป็นรหัสผลยกเลิกที่กำหนด เช่น (XALL, XPOL, XPRB)
             if df_filter_notesy_noresultcode is not None and not df_filter_notesy_noresultcode.empty:
                 action_status = "W"
                 request_remark = "Auto Cancel MT รหัสผลที่กำหนดไม่ถูกต้อง ไม่สามารถดำเนินการยกเลิกได้ รบกวนตรวจสอบค่ะ"
                 Set_action_code(action_status, request_remark, df_filter_notesy_noresultcode)
-            
             return True
         
         except Exception as e:
@@ -812,19 +815,25 @@ with DAG(
         df_concat_resultcode_has_paid = result.get("df_concat_resultcode_has_paid", pd.DataFrame())
         df_concat_resultcode_no_returndate = result.get("df_concat_resultcode_no_returndate", pd.DataFrame())
         
+        formatted_table_df_concat_resultcode_has_paid = df_concat_resultcode_has_paid.to_markdown(index=False)
+        formatted_table_df_concat_resultcode_no_returndate = df_concat_resultcode_no_returndate.to_markdown(index=False)
+            
+        # print(query)
+        print(f"\n{formatted_table_df_concat_resultcode_has_paid}")
+        
+        print(f"\n{formatted_table_df_concat_resultcode_no_returndate}")
+        
         try:
             # resultcode ที่อยู่ใน (XALL, XPOL, XPRB) และ มียอดชำระเข้ามาในวัน
             if df_concat_resultcode_has_paid is not None and not df_concat_resultcode_has_paid.empty:
                 action_status = "X"
                 request_remark = "Auto Cancel MT พบยอดรับชำระหลังจากตั้งโค้ดยกเลิก หากต้องการยกเลิกรบกวนตั้งโค้ดยกเลิกให้ใหม่อีกครั้ง"
                 Set_action_code(action_status, request_remark, df_concat_resultcode_has_paid)
-                
             # resultcode ที่อยูใน (XALL, XPOL, XPRB) และ ไม่มีค่า Returndate
             elif df_concat_resultcode_no_returndate is not None and not df_concat_resultcode_no_returndate.empty:
                 action_status = "W"
                 request_remark = "Auto Cancel MT ระบบไม่สามารถยกเลิกได้ รบกวนตรวจสอบ"
                 Set_action_code(action_status, request_remark, df_concat_resultcode_no_returndate)
-            
             return True
         
         except Exception as e:
