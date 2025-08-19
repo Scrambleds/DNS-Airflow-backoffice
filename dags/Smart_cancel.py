@@ -309,168 +309,111 @@ with DAG(
                             XININSURE.SYSBYTEDES SB
                         WHERE
                             SB.COLUMNNAME = 'PAYMENTSTATUS'
-            AND SB.TABLENAME = 'SALE'
-                AND SB.BYTECODE = S.PAYMENTSTATUS) AS PAYMENTSTATUS,
-            S.PAYMENTMODE,
-            F.STAFFCODE,
-            F.STAFFTYPE,
-            F.STAFFCODE || ':' || F.STAFFNAME AS STAFFNAME,
-            D.DEPARTMENTID,
-            D.DEPARTMENTCODE || ':' || D.DEPARTMENTNAME AS DEPARTMENTNAME,
-            D.DEPARTMENTCODE,
-            D.DEPARTMENTGROUP,
-            ssa.actionid,
-            ssa.actioncode,
-            ssa.actionstatus,
-            ssa.SEQUENCE,
-            (
-            SELECT
-                r.PROVINCECODE
-            FROM
-                XININSURE.ROUTE r
-            WHERE
-                s.ROUTEID = r.ROUTEID) AS PROVINCECODE,
-            ssa.RESULTID,
-            (
-            SELECT
-                r.RESULTCODE
-            FROM
-                XININSURE.RESULT r
-            WHERE
-                r.RESULTID = ssa.RESULTID) AS RESULTCODE,
-            S.MASTERSALEID,
-            ssa.duedate,
-            (SELECT MAX(r.SAVEDATE ) 
-                FROM XININSURE.RECEIVEITEMCLEAR T , 
-                        xininsure.receiveitem i,
-                        xininsure.receive    r              
-                WHERE  t.receiveid = i.receiveid
-                and    t.receiveitem = i.receiveitem
-                and    i.receiveid = r.receiveid
-                and    r.receivestatus in ('S','C')
-            and    i.receivebookcode not  in('R01','R03','R02','R04')
-                and   T.SALEID = SSA.SALEID   )  AS LASTUPDATEDATETIME,
-            (
-            SELECT
-                max(rc.installment)
-                -- ชำระล่าสุดงวดที่
-            FROM
-                xininsure.receiveitem ri,
-                xininsure.receiveitemclear rc
-            WHERE
-                ri.receiveid = rc.receiveid
-                AND rc.receiveitem = rc.receiveitem
-                AND ri.saleid = S.SALEID) AS LASTINSTALLMENT,
-            (
-            SELECT
-                max(sa.installment)
-                ---  งานที่ตามอยู่
-            FROM
-                xininsure.saleaction sa
-            WHERE
-                sa.actionid = ssa.actionid
-                AND sa.actionstatus = 'W'
-            AND sa.saleid = S.SALEID
-            AND sa.sequence = (
-            SELECT
-                max(sa.sequence)
-            FROM
-                xininsure.saleaction sa
-            WHERE
-                sa.actionid = ssa.actionid
-                AND sa.actionstatus = 'W'
-                        AND sa.saleid = S.SALEID)) AS FOLLOWINSTALLMENT,
-                        su.SUPPLIERCODE,
-            NVL(
-                    (
-                    SELECT
-                        s.BALANCE
+                            AND SB.TABLENAME = 'SALE'
+                            AND SB.BYTECODE = S.PAYMENTSTATUS) AS PAYMENTSTATUS,
+                        S.PAYMENTMODE,
+                        F.STAFFCODE,
+                        F.STAFFTYPE,
+                        F.STAFFCODE || ':' || F.STAFFNAME AS STAFFNAME,
+                        D.DEPARTMENTID,
+                        D.DEPARTMENTCODE || ':' || D.DEPARTMENTNAME AS DEPARTMENTNAME,
+                        D.DEPARTMENTCODE,
+                        D.DEPARTMENTGROUP,
+                        ssa.actionid,
+                        ssa.actioncode,
+                        ssa.actionstatus,
+                        ssa.SEQUENCE,
+                        (
+                        SELECT
+                            r.PROVINCECODE
+                        FROM
+                            XININSURE.ROUTE r
+                        WHERE
+                            s.ROUTEID = r.ROUTEID) AS PROVINCECODE,
+                        ssa.RESULTID,
+                        (
+                        SELECT
+                            r.RESULTCODE
+                        FROM
+                            XININSURE.RESULT r
+                        WHERE
+                            r.RESULTID = ssa.RESULTID) AS RESULTCODE,
+                        S.MASTERSALEID,
+                        ssa.duedate,
+                        (
+                        SELECT
+                            -- i.*
+                            SUM(i.RECEIVEAMOUNT)
+                        FROM
+                            XININSURE.RECEIVEITEMCLEAR T, 
+                                xininsure.receiveitem i,
+                                xininsure.receive r
+                        WHERE
+                            t.receiveid = i.receiveid
+                            AND t.receiveitem = i.receiveitem
+                            AND i.receiveid = r.receiveid
+                            AND r.receivestatus IN ('S', 'C')
+                            -- AND i.RECEIVEDATE = TRUNC(SYSDATE)
+                                AND i.RECEIVEDATE >= TO_DATE('20/07/2024', 'DD/MM/YYYY')
+                                    AND i.RECEIVEDATE <= TO_DATE('30/07/2024', 'DD/MM/YYYY')
+                                    -- and i.receivebookcode not  in('R01','R03','R02','R04')
+                                        AND T.SALEID = SSA.SALEID ) AS PAIDCURRENTDATE,
+                        PT.PRODUCTGROUP,
+                        PT.PRODUCTTYPE
                     FROM
-                        xininsure.salepayment s
+                        XININSURE.SALE S,
+                        XININSURE.STAFF F,
+                        XININSURE.DEPARTMENT D,
+                        XININSURE.PRODUCT P,
+                        XININSURE.PRODUCTTYPE PT,
+                        XININSURE.SUPPLIER SU,
+                        XININSURE.ROUTE R,
+                        XININSURE.BRANCH B,
+                        XININSURE.STOCK ST,
+                        (
+                        SELECT
+                            SA.SALEID ,
+                            SA.INSTALLMENT,
+                            a.actionid,
+                            a.actioncode ,
+                            sa.actionstatus,
+                            sa.RESULTID,
+                            sa.duedate,
+                            sa.ACTIONREMARK,
+                            sa.REQUESTREMARK,
+                            sa.sequence
+                        FROM
+                            XININSURE.SALEACTION SA,
+                            xininsure.action a
+                        WHERE
+                            SA.ACTIONID IN(3760, 3761, 2261, 3740, 3741, 3742, 3743,
+                                        5933, 11293, 7533, 9133, 9174, 11574, 11575, 11576, 
+                                        11577, 11553, 11554, 11555, 15014)
+                                AND sa.actionid = a.actionid
+                                --ดำเนินการแล้ว
+                                AND SA.ACTIONSTATUS IN ('R', 'W', 'Y')
+                                -- AND SA.DUEDATE = TRUNC(SYSDATE)
+                                    AND SA.DUEDATE >= TO_DATE('20/07/2024', 'DD/MM/YYYY')
+                                        AND SA.DUEDATE <= TO_DATE('30/07/2024', 'DD/MM/YYYY')
+                                    ) SSA
                     WHERE
-                        s.saleid = ssa.saleid
-                        AND s.balance > 0
-                        AND s.installment = (
-                            SELECT
-                                sa.installment
-                            FROM
-                                xininsure.saleaction sa
-                            WHERE
-                                sa.saleid = ssa.saleid
-                                AND sa.actionid = 44
-                                -- C01
-                AND sa.actionstatus = 'W'
-                AND sa.sequence = (
-                    SELECT
-                        max(sa.sequence)
-                    FROM
-                        xininsure.saleaction sa
-                    WHERE
-                        sa.saleid = ssa.saleid
-                        AND sa.actionid = 44
-                        -- C01
-                        AND sa.actionstatus = 'W'
-                                )
-                        )
-                    ),
-                    0
-                )AS balance,
-                PT.PRODUCTGROUP,
-                PT.PRODUCTTYPE
-            FROM
-                XININSURE.SALE S,
-                XININSURE.STAFF F,
-                XININSURE.DEPARTMENT D,
-                XININSURE.PRODUCT P,
-                XININSURE.PRODUCTTYPE PT,
-                XININSURE.SUPPLIER SU,
-                XININSURE.ROUTE R,
-                XININSURE.BRANCH B,
-                XININSURE.STOCK ST,
-                (
-                SELECT
-                    SA.SALEID ,
-                    SA.INSTALLMENT,
-                    a.actionid,
-                    a.actioncode ,
-                    sa.actionstatus,
-                    sa.RESULTID,
-                    sa.duedate,
-                    sa.ACTIONREMARK,
-                    sa.REQUESTREMARK,
-                    sa.sequence
-                    FROM
-                    XININSURE.SALEACTION SA,
-                    xininsure.action a
-                WHERE
-                    SA.ACTIONID IN(3760, 3761, 2261, 3740, 3741, 3742, 3743,
-                    5933, 11293, 7533, 9133, 9174, 11574, 11575, 11576, 
-                    11577, 11553, 11554, 11555, 15014)
-                    AND sa.actionid = a.actionid
-                    --ดำเนินการแล้ว
-                    AND SA.ACTIONSTATUS IN ('R', 'W', 'Y')
-				-- AND SA.DUEDATE = TO_DATE('30/07/2024', 'DD/MM/YYYY')
-              		AND SA.DUEDATE >= TO_DATE('20/07/2024', 'DD/MM/YYYY')
-              		AND SA.DUEDATE <= TO_DATE('30/07/2024', 'DD/MM/YYYY')
-                 ) SSA
-            WHERE
-                S.SALEID = SSA.SALEID
-                AND S.STAFFID = F.STAFFID
-                AND S.STAFFDEPARTMENTID = D.DEPARTMENTID
-                AND S.ROUTEID = R.ROUTEID
-                AND S.PRODUCTID = P.PRODUCTID
-                AND P.SUPPLIERID = SU.SUPPLIERID
-                AND P.PRODUCTTYPE = PT.PRODUCTTYPE
-                AND B.BRANCHID = R.BRANCHID
-                AND ST.SALEID = S.SALEID
---                AND PT.PRODUCTGROUP = 'MT'
-                AND SU.SUPPLIERCODE IN ('KWIL','AIA','SSL','BKI','BLA','VY','DHP','TVI','MTI','MTL','MLI','ALIFE','FWD','KTAL','ACE','SELIC','PLA','TSLI', 'ESY')
-                --อนุมัติ
-                AND S.PLATEID IS NULL
-                AND S.CANCELDATE IS NULL
-                AND S.CANCELEFFECTIVEDATE IS NULL
-            ORDER BY
-                s.SALEID DESC   """
+                        S.SALEID = SSA.SALEID
+                        AND S.STAFFID = F.STAFFID
+                        AND S.STAFFDEPARTMENTID = D.DEPARTMENTID
+                        AND S.ROUTEID = R.ROUTEID
+                        AND S.PRODUCTID = P.PRODUCTID
+                        AND P.SUPPLIERID = SU.SUPPLIERID
+                        AND P.PRODUCTTYPE = PT.PRODUCTTYPE
+                        AND B.BRANCHID = R.BRANCHID
+                        AND ST.SALEID = S.SALEID
+                        -- AND PT.PRODUCTGROUP = 'MT'
+                    --	AND SU.SUPPLIERCODE IN ('KWIL', 'AIA', 'SSL', 'BKI', 'BLA', 'VY', 'DHP', 'TVI', 'MTI', 'MTL', 'MLI', 'ALIFE', 'FWD', 'KTAL', 'ACE', 'SELIC', 'PLA', 'TSLI', 'ESY')
+                        --อนุมัติ
+                        AND S.PLATEID IS NULL
+                        AND S.CANCELDATE IS NULL
+                        AND S.CANCELEFFECTIVEDATE IS NULL
+                    ORDER BY
+                        s.SALEID DESC """
             
             print("Fetching data...")
             cursor.execute(query)
@@ -721,8 +664,15 @@ with DAG(
         try:
             df = pd.concat([df_esy_result,df_esy_noresult],ignore_index=True)
             print(f"df: {len(df)}")
-            # mask = df["LASTUPDATEDATETIME"] >= df["DUEDATE"]
-            mask = df.query("PAYMENTSTATUS == 'W'")
+            
+            # mask = df["LASTUPDATEDATETIME"] == df["DUEDATE"]
+            
+            #ตรวจสอบว่ามีรับชำระมาในวันหรือไม่)
+            
+            mask = df["PAIDCURRENTDATE"] > 0
+
+            # mask = df.query("PAYMENTSTATUS == 'W'")
+            
             df_no_paid = df[mask]
             df_has_paid = df[~mask]
             
@@ -746,18 +696,9 @@ with DAG(
         
         result = ti.xcom_pull(task_ids="Check_balance", key="return_value")
         df_no_paid = result["df_no_paid"]
-        
-        result = ti.xcom_pull(task_ids="Select_esy02_X", key="return_value")
-        df_filter_notesy_noresultcode = result["df_filter_notesy_noresultcode"]
 
-        df = pd.DataFrame(columns=df_has_paid.columns)
+        # df = pd.DataFrame(columns=df_has_paid.columns)
         try:
-            # df = pd.concat([df_has_paid,df_no_paid],ignore_index=True)
-            # print(f"df: {len(df)}")
-            # mask = df["LASTUPDATEDATETIME"] >= df["DUEDATE"]
-            # mask = df["BALANCE"] > 0
-            # df_no_paid = df[mask]
-            # df_has_paid = df[~mask]
             
             df_paymentstatus_Y = df_has_paid.query("PAYMENTSTATUS == 'Y'")
             df_paymentstatus_not_Y = df_no_paid.query("PAYMENTSTATUS not in 'Y")
@@ -820,12 +761,17 @@ with DAG(
             
             #เตรียมนำไปกรองข้อมูลเฉพาะ return date
             df_concat_resultcode = pd.concat([df_XALL_Y,df_XPOL_Y,df_XPRB_no_policynumber],ignore_index=True)
+            
+            mask = df_concat_resultcode[df_concat_resultcode["RETURNDATE"].notnull]
 
+            # mask = df.query("PAYMENTSTATUS == 'W'")
+            
             #กรองข้อมูลที่มีค่า return date
-            df_concat_resultcode_has_returndate = df_concat_resultcode[df_concat_resultcode["RETURNDATE"].notnull]
+            df_concat_resultcode_has_returndate = df_concat_resultcode[mask]
             
             #กรองข้อมูลที่ไม่มีค่า return date
-            df_concat_resultcode_no_returndate = df_concat_resultcode[df_concat_resultcode["RETURNDATE"].isnull]
+            df_concat_resultcode_no_returndate = df_concat_resultcode[~mask]
+        
 
             formatted_table_df_XALL_Y = df_XALL_Y.to_markdown(index=False)
             formatted_table_df_XPOL_Y = df_XPOL_Y.to_markdown(index=False)
@@ -864,8 +810,21 @@ with DAG(
         result = ti.xcom_pull(task_ids="Select_esy02_X", key="return_value")
         df_filter_notesy_noresultcode = result["df_filter_notesy_noresultcode"]
         
+        # result = ti.xcom_pull(task_ids="Split_segment_condition", key="return_value")
+        # df_concat_resultcode_no_returndate = result['df_concat_resultcode_no_returndate']
+        
         try:
-            # df_filter_notesy_noresultcode
+            
+            #ไม่เป็นรหัสผลยกเลิกที่กำหนด เช่น XALL, XPOL, XPRB
+            if df_filter_notesy_noresultcode:
+                action_status = "W"
+                request_remark = "Auto Cancel MT รหัสผลที่กำหนดไม่ถูกต้อง ไม่สามารถดำเนินการยกเลิกได้ รบกวนตรวจสอบค่ะ"
+                Set_action_code(action_status, request_remark, df_filter_notesy_noresultcode)
+                
+            # elif df_concat_resultcode_no_returndate:
+            #     action_status = "W"
+            #     request_remark = "Auto Cancel MT ระบบไม่สามารถยกเลิกได้ รบกวนตรวจสอบ"
+            #     Set_action_code(action_status, request_remark, df_concat_resultcode_no_returndate)
             
             return True
         
@@ -885,8 +844,21 @@ with DAG(
         result = ti.xcom_pull(task_ids="Split_segment_condition", key="return_value")
         df_concat_resultcode_has_paid = result["df_concat_resultcode_has_paid"]
         
+        result = ti.xcom_pull(task_ids="Split_segment_condition", key="return_value")
+        df_concat_resultcode_no_returndate = result['df_concat_resultcode_no_returndate']
+        
         try:
-            # df_concat_resultcode_has_paid
+            # resultcode ที่อยู่ใน (XALL, XPOL, XPRB) และ มียอดชำระเข้ามาในวัน
+            if df_concat_resultcode_has_paid:
+                action_status = "X"
+                request_remark = "Auto Cancel MT พบยอดรับชำระหลังจากตั้งโค้ดยกเลิก หากต้องการยกเลิกรบกวนตั้งโค้ดยกเลิกให้ใหม่อีกครั้ง"
+                Set_action_code(action_status, request_remark, df_concat_resultcode_has_paid)
+                
+            # resultcode ที่อยูใน (XALL, XPOL, XPRB) และ ไม่มีค่า Returndate
+            elif df_concat_resultcode_no_returndate:
+                action_status = "W"
+                request_remark = "Auto Cancel MT ระบบไม่สามารถยกเลิกได้ รบกวนตรวจสอบ"
+                Set_action_code(action_status, request_remark, df_concat_resultcode_no_returndate)
             
             return True
         
