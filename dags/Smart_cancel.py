@@ -31,8 +31,10 @@ currentDateAndTime = datetime.now(tz=local_tz)
 currentDate = currentDateAndTime.strftime("%Y-%m-%d")
 cmtel_config_str = config.get("variable", "CMTEL_config")
 cmt21_config_str = config.get("variable", "CMT21_config")
-invalid_action_codes = config.get("variable", "invalid_action_codes")
+invalid_action_codes_str = config.get("variable", "invalid_action_codes")
 cancel_messages_str = config.get("variable", "cancel_messages")
+
+invalid_action_codes = json.loads(invalid_action_codes_str)
 
 def ConOracle():
     try:
@@ -168,7 +170,7 @@ def Check_action_code(row, df_actionData):
         elif actionCode in invalid_action_codes:
             code = 'CMT105.1'
         
-        print(code)
+        print("action code :",actionCode, "change to : ",code)
         if code:
             result = df_actionData.query("ACTIONCODE == @code")["ACTIONID"]
             print(f"Actioncode: {code}, Result: {result} ")
@@ -250,7 +252,6 @@ def Set_result_cancel(df = pd.DataFrame(), isBefore3PM = False):
     
     field_cond = ""
     var_cond = {}
-    extra_cond = {}
 
     sql = """
             UPDATE
@@ -593,6 +594,11 @@ with DAG(
             df = pd.DataFrame(
                 cursor.fetchall(), columns=[desc[0] for desc in cursor.description]
             )
+
+            print("======== start df original ============")
+            print("row count:", len(df))
+            print(df.head().to_markdown(index=False))
+            print("======== end df original ============")
             
             df_digital_room = df.query("DEPARTMENTGROUP in ('DM')")
             
@@ -683,6 +689,9 @@ with DAG(
         result = ti.xcom_pull(task_ids="get_cancellation_group.Get_cancelled_work", key="return_value")
         
         df = result.get("df_cancel_work", pd.DataFrame())
+
+        print("==== df_cancel_work ====")
+        print(df.head().to_markdown(index=False))
         
         if cursor is None or conn is None:
             return pd.DataFrame()  # Return empty DataFrame
@@ -733,6 +742,10 @@ with DAG(
 
             df_result_is_esy = df.loc[valid_indices].copy() if valid_indices else pd.DataFrame()
             df_result_not_esy = df.loc[not_valid_indices].copy() if not_valid_indices else pd.DataFrame()
+
+            print("==== df_result_is_esy ====")
+            print(df_result_is_esy.head().to_markdown(index=False))
+            print("==== end df_result_is_esy ====")
 
             if not df_result_is_esy.empty and "RESULTCODE" in df_result_is_esy.columns:
                 df_filter_esy_noresultcode = df_result_is_esy.query("RESULTCODE not in ('XPOL', 'XALL', 'XPRB')")
@@ -790,7 +803,8 @@ with DAG(
         if df.empty:
             print("ESY No : records to process.")
             return None
-        
+        print("isin invalid action codes: ", invalid_action_codes)
+        print("type of", invalid_action_codes, "is", type(invalid_action_codes))
         df_invalid_actions = df[df['ACTIONCODE'].isin(invalid_action_codes)]
         df_valid_actions = df[~df['ACTIONCODE'].isin(invalid_action_codes)]
         
