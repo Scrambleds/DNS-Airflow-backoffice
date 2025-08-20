@@ -20,6 +20,10 @@ import logging
 from datetime import datetime
 import copy
 import time
+from linebot import LineBotApi
+from linebot.exceptions import LineBotApiError
+from linebot.models import TextSendMessage
+from linebot.models import FlexSendMessage
 # import cx_Oracle
 
 config_file_path = 'config/Smart_cancel.cfg'
@@ -29,16 +33,107 @@ local = config.get("variable","tz")
 local_tz = pendulum.timezone(local)
 currentDateAndTime = datetime.now(tz=local_tz)
 currentDate = currentDateAndTime.strftime("%Y-%m-%d")
+currentTime = currentDateAndTime.strftime("%H:%M:%S")
 cmtel_config_str = config.get("variable", "CMTEL_config")
 cmt21_config_str = config.get("variable", "CMT21_config")
 invalid_action_codes_str = config.get("variable", "invalid_action_codes")
 cancel_messages_str = config.get("variable", "cancel_messages")
 
 invalid_action_codes = json.loads(invalid_action_codes_str)
+line_access_token = config.get('variable', 'channel_access_token')
+line_user_id = config.get('variable', 'line_user_id')
+line_bot_api = LineBotApi(config.get('variable', 'channel_access_token'))
+
+def send_flex_notification_start(message=None):
+    """
+    ส่ง Flex Message เริ่มต้นทำงาน
+    :param message: ข้อความเพิ่มเติมในกรณี error (optional)
+    """
+    try:
+        contents = {
+            "type": "bubble",
+            "body": {
+                "type": "box",
+                "layout": "vertical",
+                "contents": [
+                    {
+                        "type": "text",
+                        "text": "AUTOMATION",
+                        "color": "#00d610",
+                        "size": "sm",
+                        "weight": "bold",
+                        "margin": "xs"
+                    },
+                    {
+                        "type": "text",
+                        "text": "Smart cancel MT (Phase 2)",
+                        "size": "lg",
+                        "margin": "xl",
+                        "color": "#727272",
+                        "weight": "bold"
+                    },
+                    {
+                        "type": "text",
+                        "text": "[ระบบเริ่มทำงาน]" if not message else "[เกิดข้อผิดพลาด]",
+                        "margin": "none",
+                        "size": "lg",
+                        "weight": "bold",
+                        "color": "#727272"
+                    },
+                    {
+                        "type": "text",
+                        "text": f"วันที่ {currentDate} เวลา {currentTime} น.",
+                        "margin": "lg",
+                        "size": "xs",
+                        "color": "#a6a6a6"
+                    },
+                    {
+                        "type": "separator",
+                        "margin": "lg"
+                    }
+                ]
+            }
+        }
+        
+        if message:
+            contents["body"]["contents"].append({
+                "type": "text",
+                "text": "รายละเอียดข้อผิดพลาด:",
+                "margin": "lg",
+                "size": "md",
+                "weight": "bold",
+                "color": "#000000"
+            })
+            contents["body"]["contents"].append({
+                "type": "text",
+                "text": message,
+                "margin": "md",
+                "size": "sm",
+                "color": "#000000",
+                "wrap": True
+            })
+        
+        # สร้าง Flex Message
+        flex_message = FlexSendMessage(
+            alt_text="สถานะการทำงาน DNC",
+            contents=contents
+        )
+
+        # ส่งข้อความ
+        # line_bot_api = LineBotApi(line_access_token)
+        line_bot_api.push_message(line_user_id, flex_message)
+        
+        logging.info("Flex notification sent successfully")
+        return True
+        
+    except Exception as e:
+        logging.error(f"Error sending Flex notification: {e}")
+        return False
+    
 
 def ConOracle():
     try:
-        env = os.getenv('ENV', 'xininsure_preprod_demo')
+        env = os.getenv('ENV', 'xininsure_dev')
         db_host = config.get(env, 'host_xininsure')
         db_port = config.get(env, 'port_xininsure')
         db_username = config.get(env, 'username_xininsure')
@@ -53,6 +148,7 @@ def ConOracle():
         return cursor, conn
     except oracledb.Error as error:
         message = f"เกิดข้อผิดพลาดในการเชื่อมต่อกับ Oracle DB : {error}"
+        # send_flex_notification_start(message)
         print("เกิดข้อผิดพลาดในการเชื่อมต่อกับ Oracle DB:", error)
         return message, None
 
@@ -418,7 +514,7 @@ def Set_action_code(action_status = "X", request_remark = "Auto Cancel MT สิ
 default_args = {
     "owner": "DCP",
     "depends_on_past": False,
-    "retries": 3,
+    "retries": 1,
     "retry_delay": timedelta(seconds=10)
 }
 
@@ -567,7 +663,7 @@ with DAG(
                                 --ดำเนินการแล้ว
                                 AND SA.ACTIONSTATUS IN ('R', 'W', 'Y')
                                 -- AND SA.DUEDATE = TRUNC(SYSDATE)
-                                    AND SA.DUEDATE >= TO_DATE('30/07/2022', 'DD/MM/YYYY')
+                                    AND SA.DUEDATE >= TO_DATE('20/07/2024', 'DD/MM/YYYY')
                                         AND SA.DUEDATE <= TO_DATE('30/07/2024', 'DD/MM/YYYY')
                                     ) SSA
                     WHERE
@@ -684,30 +780,32 @@ with DAG(
     @task
     def Select_esy02_X(**kwargs):
         cursor, conn = ConOracle()
-        
         ti = kwargs["ti"]
         result = ti.xcom_pull(task_ids="get_cancellation_group.Get_cancelled_work", key="return_value")
-        
         df = result.get("df_cancel_work", pd.DataFrame())
 
         print("==== df_cancel_work ====")
         print(df.head().to_markdown(index=False))
-        
+
         if cursor is None or conn is None:
-            return pd.DataFrame()  # Return empty DataFrame
-        
+            return pd.DataFrame()
+
         try:
             if df.empty:
                 print("DataFrame is empty.")
-                return pd.DataFrame()  # Return empty DataFrame
-            
-            # Query สำหรับเช็คว่ามี ESY02 หรือไม่ (COUNT เท่านั้น)
-            check_esy02_query = """
-                SELECT COUNT(*) as record_count
+                return pd.DataFrame()
+
+            # 1. ดึง SALEID ที่เข้าเงื่อนไข ESY02 ทั้งหมดในรอบเดียว
+            saleids = tuple(df['SALEID'].unique())
+            if not saleids:
+                return pd.DataFrame()
+
+            check_esy02_query = f"""
+                SELECT S.SALEID
                 FROM XININSURE.SALE S
                 INNER JOIN XININSURE.SALEACTION sa ON S.SALEID = sa.SALEID
                 INNER JOIN XININSURE.ACTION a ON sa.ACTIONID = a.ACTIONID
-                WHERE S.SALEID = :SALEID
+                WHERE S.SALEID IN ({','.join([':id'+str(i) for i in range(len(saleids))])})
                 AND sa.ACTIONSTATUS = 'Y'
                 AND a.ACTIONCODE = 'ESY02'
                 AND sa.sequence = (
@@ -720,28 +818,13 @@ with DAG(
                 AND S.CANCELDATE IS NULL
                 AND S.CANCELEFFECTIVEDATE IS NULL
             """
-            
-            # เก็บ index ของ row ที่ผ่านเงื่อนไข
-            valid_indices = []
-            not_valid_indices = []
+            params = {f'id{i}': v for i, v in enumerate(saleids)}
+            cursor.execute(check_esy02_query, params)
+            esy02_saleids = set(row[0] for row in cursor.fetchall())
 
-            i=0
-            for index, row in df.iterrows():
-                saleid = row['SALEID']
-                cursor.execute(check_esy02_query, {'SALEID': saleid})
-                count_result = cursor.fetchone()
-                record_count = count_result[0] if count_result else 0
-
-                if record_count >= 1:
-                    valid_indices.append(index)
-                    print(f"Number: {i+1} Found ESY02 for SALEID={saleid} - Added to result")
-                else:
-                    not_valid_indices.append(index)
-                    print(f"Number: {i+1} No ESY02 found for SALEID={saleid} - Added to not_esy")
-                i += 1
-
-            df_result_is_esy = df.loc[valid_indices].copy() if valid_indices else pd.DataFrame()
-            df_result_not_esy = df.loc[not_valid_indices].copy() if not_valid_indices else pd.DataFrame()
+            # 2. แบ่งกลุ่มใน Pandas
+            df_result_is_esy = df[df['SALEID'].isin(esy02_saleids)].copy()
+            df_result_not_esy = df[~df['SALEID'].isin(esy02_saleids)].copy()
 
             print("==== df_result_is_esy ====")
             print(df_result_is_esy.head().to_markdown(index=False))
@@ -760,34 +843,37 @@ with DAG(
             else:
                 df_filter_notesy_noresultcode = pd.DataFrame()
                 df_filter_notesy_resultcode = pd.DataFrame()
-            
+
             formatted_table = df.to_markdown(index=False)
             print(f"\n{formatted_table}")
             print(f"Select ESY02 data successfully")
             print(f"Total records found: {len(df)}")
             print(f"Total SALEIDs checked: {len(df)}")
             print(f"Total is esy no_result_code = {df_filter_esy_noresultcode}")
-            
-            #นำไปใช้ใน Module 3
+
             print(f"Total is esy has_result_code = {df_filter_esy_resultcode}")
-            
-            #นำไปใช้งานในเงื่อนไข B
             print(f"Total not esy no_result_code = {df_filter_notesy_noresultcode}")
             print(f"Total not esy has_result_code = {df_filter_notesy_resultcode}")
-            
-            request_remark= "Auto Cancel MT สินเชื่อ ESY อนุมัติแล้วไม่สามารถยกเลิกได้ รบกวนตรวจสอบค่ะ"
-            action_status="X"
-            
+
+            request_remark = "Auto Cancel MT สินเชื่อ ESY อนุมัติแล้วไม่สามารถยกเลิกได้ รบกวนตรวจสอบค่ะ"
+            action_status = "X"
+
             conn.commit()
-            
-            return { 'action_status' : action_status , 'request_remark' : request_remark, 'df_filter_esy_noresultcode' : df_filter_esy_noresultcode, 
-                    'df_filter_esy_resultcode' : df_filter_esy_resultcode, 'df_filter_notesy_noresultcode' :  df_filter_notesy_noresultcode, 'df_filter_notesy_resultcode': df_filter_notesy_resultcode}
-            
+
+            return {
+                'action_status': action_status,
+                'request_remark': request_remark,
+                'df_filter_esy_noresultcode': df_filter_esy_noresultcode,
+                'df_filter_esy_resultcode': df_filter_esy_resultcode,
+                'df_filter_notesy_noresultcode': df_filter_notesy_noresultcode,
+                'df_filter_notesy_resultcode': df_filter_notesy_resultcode
+            }
+
         except oracledb.Error as error:
-            conn.rollback()  
+            conn.rollback()
             message = f'เกิดข้อผิดพลาด : {error}'
             print(message)
-            return pd.DataFrame()  # Return empty DataFrame on error
+            return pd.DataFrame()
         finally:
             cursor.close()
             conn.close()
