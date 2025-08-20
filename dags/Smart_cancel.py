@@ -239,6 +239,180 @@ def Get_request_cancel_by(row):
     except Exception as e:
         print(f"Get request cancel by error: {e}")
         raise e
+
+def Set_result_cancel(df = pd.DataFrame(), isBefore3PM = False):
+    cursor, conn = ConOracle()
+    
+    if df is None or df.empty:
+        print("Failed to get data.")
+        cursor.close()
+        conn.close()
+        return None
+    
+    field_cond = ""
+    var_cond = {}
+    extra_cond = {}
+
+    sql = """
+            UPDATE
+                XININSURE.SALE
+            SET
+                {0}
+            WHERE
+                X.SALEID = :saleid
+        """
+    # action_status = "X"
+    # request_remark = "Auto Cancel MT สินเชื่อ ESY อนุมัติแล้วไม่สามารถยกเลิกได้ รบกวนตรวจสอบค่ะ"
+    try:
+
+        for index, row in df.iterrows():
+            print("Fetching data...")
+            cancel_by = Get_request_cancel_by(row)
+            remark = ""
+            
+            if row["ACTIONREMARK"] is not None:
+                remark = row["ACTIONREMARK"]
+            if row["ACTIONREMARK"] is None and row["REQUESTREMARK"] is not None:
+                remark = row["REQUESTREMARK"]
+            if row['RESULTCODE'].iloc[0] in ['XPOL']:
+                field_cond = """
+                    CANCELDATE = :cancel_date,
+                    CACELRESULTID = :resultid,
+                    OTHERCANCEL = :remark,
+                    CANCELREQUESTBY = :cancel_by
+                """
+            elif row['RESULTCODE'].iloc[0] in ['XPRB']:
+                field_cond = """
+                    CANCELDATE = :cancel_date,
+                    PRBCANCELRESULTID = :resultid,
+                    OTHERCANCELPRB = :remark,
+                    CANCELREQUESTBY = :cancel_by
+                """
+            elif row['RESULTCODE'].iloc[0] in ['XALL']:
+                field_cond = """
+                    CANCELDATE = :cancel_date,
+                    CACELRESULTID = :resultid,
+                    OTHERCANCEL = :remark,
+                    PRBCANCELDATE = :cancel_date,
+                    PRBCANCELRESULTID = :resultid,
+                    OTHERCANCELPRB = :remark,
+                    CANCELREQUESTBY = :cancel_by
+                """
+            var_cond = {
+                "cancel_date" : "TRUNC(SYSDATE)" if isBefore3PM else "TRUNC(SYSDATE) + INTERVAL '1' DAY",
+                "resultid" : row["RESULTID"].iloc[0],
+                "remark" : remark,
+                "cancel_by" : cancel_by
+            }
+            cursor.execute(sql.format(field_cond), {
+                "saleid": row["SALEID"],
+                **var_cond
+            })
+
+        formatted_table = df.to_markdown(index=False)
+        # print(query)
+        print(f"\n{formatted_table}")
+        print(f"Get data successfully")
+        print(f"df: {len(df)}")
+
+        conn.commit() 
+        return { 'Set_action_code': df }
+    
+    except Exception as e:
+        print(f"Exception : {e}")
+    finally:
+        cursor.close()
+        conn.close()
+
+def Set_sale_action_status(df = pd.DataFrame()):
+    cursor, conn = ConOracle()
+    
+    if df is None or df.empty:
+        print("Failed to get data.")
+        cursor.close()
+        conn.close()
+        return None
+
+    sql = """
+            UPDATE
+                XININSURE.SALEACTION
+            SET
+                ACTIONSTATUS = 'Y'
+            WHERE
+                SALEID = :saleid
+                AND ACTIONSTATUS NOT IN ('Y')
+                AND "SEQUENCE" = :seq
+        """
+
+    try:
+
+        for index, row in df.iterrows():
+            cursor.execute(sql, {
+                "saleid": row["SALEID"],
+                "seq": row["SEQUENCE"]
+            })
+
+        conn.commit() 
+        return { 'Set_action_code': df }
+    
+    except Exception as e:
+        print(f"Exception : {e}")
+    finally:
+        cursor.close()
+        conn.close()
+
+def Set_action_code(action_status = "X", request_remark = "Auto Cancel MT สินเชื่อ ESY อนุมัติแล้วไม่สามารถยกเลิกได้ รบกวนตรวจสอบค่ะ", df = pd.DataFrame()):
+    cursor, conn = ConOracle()
+    
+    df_actionData = Get_Actions()
+    
+    if df_actionData is None or df_actionData.empty:
+        print("Failed to get action data.")
+        cursor.close()
+        conn.close()
+        return None
+
+    sql = """
+            INSERT INTO XININSURE.SALEACTION(SALEID, SEQUENCE, ACTIONID, ACTIONSTATUS, DUEDATE, REQUESTREMARK)
+            SELECT S.SALEID,
+                NVL((SELECT MAX(SEQUENCE) FROM XININSURE.SALEACTION WHERE SALEID = :saleid), 0) + 1,
+                :actionid,
+                :actionstatus,
+                TRUNC(SYSDATE),
+                :request_remark
+            FROM XININSURE.SALE S
+            WHERE S.SALEID = :saleid
+        """
+    # action_status = "X"
+    # request_remark = "Auto Cancel MT สินเชื่อ ESY อนุมัติแล้วไม่สามารถยกเลิกได้ รบกวนตรวจสอบค่ะ"
+    try:
+
+        for index, row in df.iterrows():
+            print("Fetching data...")
+            ResActionCode = Check_action_code(row, df_actionData) ## df.row
+            if ResActionCode is not None:
+                cursor.execute(sql, {
+                    "saleid": row["SALEID"],
+                    "actionid": int(ResActionCode),
+                    "actionstatus" : action_status,
+                    "request_remark" : request_remark
+                })
+                print(f"Insert {index}: SALEID={row['SALEID']}, ACTIONID={ResActionCode}")
+
+        formatted_table = df.to_markdown(index=False)
+        # print(query)
+        print(f"\n{formatted_table}")
+        print(f"Get data successfully")
+        print(f"df: {len(df)}")
+
+        conn.commit() 
+        return { 'Set_action_code': df }
+    
+    except oracledb.Error as e:
+        print(f"Get_Data : {e}")
+    finally:
+        cursor.close()
+        conn.close()
     
 # Default arguments
 default_args = {
@@ -841,180 +1015,50 @@ with DAG(
             print(f"Check_payment_date : {e}")
             pass
 
-    def Set_result_cancel(df = pd.DataFrame(), isBefore3PM = False):
-        cursor, conn = ConOracle()
-        
-        if df is None or df.empty:
-            print("Failed to get data.")
-            cursor.close()
-            conn.close()
-            return None
-        
-        field_cond = ""
-        var_cond = {}
-        extra_cond = {}
+    @task.branch
+    def Check_time_result_cancel(**kwargs):
+        current_time = datetime.now(local_tz).time
+        flg_time = datetime.strptime("15:00", "%H:%M").time()
 
-        sql = """
-                UPDATE
-                    XININSURE.SALE
-                SET
-                    {0}
-                WHERE
-                    X.SALEID = :saleid
-            """
-        # action_status = "X"
-        # request_remark = "Auto Cancel MT สินเชื่อ ESY อนุมัติแล้วไม่สามารถยกเลิกได้ รบกวนตรวจสอบค่ะ"
+        if (current_time < flg_time):
+            return "result_cancel_before_3pm"
+        else:
+            return "result_cancel_after_3pm"
+
+    @task
+    def result_cancel_before_3pm(**kwargs):
+        ti = kwargs["ti"]
+        result = ti.xcom_pull(task_ids="get_cancellation_group.Split_segment_condition", key="return_value")
+        df = result.get("result_cancel_before_3pm", pd.DataFrame()) # #FF0000 ต้องมาเปลี่ยนทีหลัง
+
+        print("======= start result_cancel_before_3pm =======")
+        
         try:
-
-            for index, row in df.iterrows():
-                print("Fetching data...")
-                cancel_by = Get_request_cancel_by(row)
-                remark = ""
-                
-                if row["ACTIONREMARK"] is not None:
-                    remark = row["ACTIONREMARK"]
-                if row["ACTIONREMARK"] is None and row["REQUESTREMARK"] is not None:
-                    remark = row["REQUESTREMARK"]
-                if row['RESULTCODE'].iloc[0] in ['XPOL']:
-                    field_cond = """
-                        CANCELDATE = :cancel_date,
-                        CACELRESULTID = :resultid,
-                        OTHERCANCEL = :remark,
-                        CANCELREQUESTBY = :cancel_by
-                    """
-                elif row['RESULTCODE'].iloc[0] in ['XPRB']:
-                    field_cond = """
-                        CANCELDATE = :cancel_date,
-                        PRBCANCELRESULTID = :resultid,
-                        OTHERCANCELPRB = :remark,
-                        CANCELREQUESTBY = :cancel_by
-                    """
-                elif row['RESULTCODE'].iloc[0] in ['XALL']:
-                    field_cond = """
-                        CANCELDATE = :cancel_date,
-                        CACELRESULTID = :resultid,
-                        OTHERCANCEL = :remark,
-                        PRBCANCELDATE = :cancel_date,
-                        PRBCANCELRESULTID = :resultid,
-                        OTHERCANCELPRB = :remark,
-                        CANCELREQUESTBY = :cancel_by
-                    """
-                var_cond = {
-                    "cancel_date" : "TRUNC(SYSDATE)" if isBefore3PM else "TRUNC(SYSDATE) + INTERVAL '1' DAY",
-                    "resultid" : row["RESULTID"].iloc[0],
-                    "remark" : remark,
-                    "cancel_by" : cancel_by
-                }
-                cursor.execute(sql.format(field_cond), {
-                    "saleid": row["SALEID"],
-                    **var_cond
-                })
-
-            formatted_table = df.to_markdown(index=False)
-            # print(query)
-            print(f"\n{formatted_table}")
-            print(f"Get data successfully")
-            print(f"df: {len(df)}")
-
-            conn.commit() 
-            return { 'Set_action_code': df }
-        
+            if df.empty:
+                print("No ESY records to process for cancellation before 3 PM.")
+                return None
+            Set_result_cancel(df, isBefore3PM=True)
+            Set_sale_action_status(df)
         except Exception as e:
-            print(f"Exception : {e}")
-        finally:
-            cursor.close()
-            conn.close()
+            print(f"Exception in result_cancel_before_3pm: {e}")
+        return None
+    
+    @task
+    def result_cancel_after_3pm(**kwargs):
+        ti = kwargs["ti"]
+        result = ti.xcom_pull(task_ids="get_cancellation_group.Split_segment_condition", key="return_value")
+        df = result.get("result_cancel_before_3pm", pd.DataFrame()) # #FF0000 ต้องมาเปลี่ยนทีหลัง
 
-    def Set_sale_action_status(df = pd.DataFrame()):
-        cursor, conn = ConOracle()
-        
-        if df is None or df.empty:
-            print("Failed to get data.")
-            cursor.close()
-            conn.close()
-            return None
-
-        sql = """
-                UPDATE
-                    XININSURE.SALEACTION
-                SET
-                    ACTIONSTATUS = 'Y'
-                WHERE
-                    SALEID = :saleid
-                    AND ACTIONSTATUS NOT IN ('Y')
-                    AND "SEQUENCE" = :seq
-            """
-
+        print("======= start result_cancel_after_3pm =======")
         try:
-
-            for index, row in df.iterrows():
-                cursor.execute(sql, {
-                    "saleid": row["SALEID"],
-                    "seq": row["SEQUENCE"]
-                })
-
-            conn.commit() 
-            return { 'Set_action_code': df }
-        
+            if df.empty:
+                print("No ESY records to process for cancellation after 3 PM.")
+                return None
+            Set_result_cancel(df, isBefore3PM=False)
+            Set_sale_action_status(df)
         except Exception as e:
-            print(f"Exception : {e}")
-        finally:
-            cursor.close()
-            conn.close()
-
-    # @task #ตั้ง default ไปก่อนกัน error แก้ทีหลัง
-    def Set_action_code(action_status = "X", request_remark = "Auto Cancel MT สินเชื่อ ESY อนุมัติแล้วไม่สามารถยกเลิกได้ รบกวนตรวจสอบค่ะ", df = pd.DataFrame()):
-        cursor, conn = ConOracle()
-        
-        df_actionData = Get_Actions()
-        
-        if df_actionData is None or df_actionData.empty:
-            print("Failed to get action data.")
-            cursor.close()
-            conn.close()
-            return None
-
-        sql = """
-                INSERT INTO XININSURE.SALEACTION(SALEID, SEQUENCE, ACTIONID, ACTIONSTATUS, DUEDATE, REQUESTREMARK)
-                SELECT S.SALEID,
-                    NVL((SELECT MAX(SEQUENCE) FROM XININSURE.SALEACTION WHERE SALEID = :saleid), 0) + 1,
-                    :actionid,
-                    :actionstatus,
-                    TRUNC(SYSDATE),
-                    :request_remark
-                FROM XININSURE.SALE S
-                WHERE S.SALEID = :saleid
-            """
-        # action_status = "X"
-        # request_remark = "Auto Cancel MT สินเชื่อ ESY อนุมัติแล้วไม่สามารถยกเลิกได้ รบกวนตรวจสอบค่ะ"
-        try:
-
-            for index, row in df.iterrows():
-                print("Fetching data...")
-                ResActionCode = Check_action_code(row, df_actionData) ## df.row
-                if ResActionCode is not None:
-                    cursor.execute(sql, {
-                        "saleid": row["SALEID"],
-                        "actionid": int(ResActionCode),
-                        "actionstatus" : action_status,
-                        "request_remark" : request_remark
-                    })
-                    print(f"Insert {index}: SALEID={row['SALEID']}, ACTIONID={ResActionCode}")
-
-            formatted_table = df.to_markdown(index=False)
-            # print(query)
-            print(f"\n{formatted_table}")
-            print(f"Get data successfully")
-            print(f"df: {len(df)}")
-
-            conn.commit() 
-            return { 'Set_action_code': df }
-        
-        except oracledb.Error as e:
-            print(f"Get_Data : {e}")
-        finally:
-            cursor.close()
-            conn.close()
+            print(f"Exception in result_cancel_after_3pm: {e}")
+        return None
 
     #Dummy
     start = EmptyOperator(task_id="start_dag", trigger_rule="none_failed_min_one_success")
@@ -1056,8 +1100,11 @@ with DAG(
     def condition_group():
         condition_c_task = Condition_C()
         condition_b_task = Condition_B()
+        check_time_result_task = Check_time_result_cancel()
+        before_3pm_task = result_cancel_before_3pm()
+        after_3pm_task = result_cancel_after_3pm()
         
-        condition_c_task >> condition_b_task
+        condition_c_task >> condition_b_task >> check_time_result_task >> [before_3pm_task, after_3pm_task]
         
     #กำหนด workflow
     (
