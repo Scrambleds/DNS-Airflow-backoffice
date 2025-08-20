@@ -36,7 +36,7 @@ cancel_messages_str = config.get("variable", "cancel_messages")
 
 def ConOracle():
     try:
-        env = os.getenv('ENV', 'xininsure_dev')
+        env = os.getenv('ENV', 'xininsure_preprod_demo')
         db_host = config.get(env, 'host_xininsure')
         db_port = config.get(env, 'port_xininsure')
         db_username = config.get(env, 'username_xininsure')
@@ -314,7 +314,7 @@ def Set_result_cancel(df = pd.DataFrame(), isBefore3PM = False):
         print(f"Get data successfully")
         print(f"df: {len(df)}")
 
-        conn.commit() 
+        #conn.commit()  
         return { 'Set_action_code': df }
     
     except Exception as e:
@@ -351,7 +351,7 @@ def Set_sale_action_status(df = pd.DataFrame()):
                 "seq": row["SEQUENCE"]
             })
 
-        conn.commit() 
+        #conn.commit()  
         return { 'Set_action_code': df }
     
     except Exception as e:
@@ -404,7 +404,7 @@ def Set_action_code(action_status = "X", request_remark = "Auto Cancel MT สิ
         print(f"Get data successfully")
         print(f"df: {len(df)}")
 
-        conn.commit() 
+        #conn.commit()  
         return { 'Set_action_code': df }
     
     except oracledb.Error as e:
@@ -461,7 +461,8 @@ with DAG(
     def Get_cancelled_work():
         cursor, conn = ConOracle()
         try:
-            query = f"""SELECT
+            query = f"""
+                        SELECT 
                         S.SALEID,
                         xininsure.getbookname(s.periodid,
                         s.salebookcode,
@@ -472,7 +473,7 @@ with DAG(
                         r.routecode,
                         s.paidamount,
                         s.cancelresultid,
-                        ST.RETURNDATE,
+                        (SELECT st.RETURNDATE FROM STOCK st WHERE ST.SALEID = S.SALEID FETCH FIRST 1 ROWS ONLY) AS RETURNDATE,
                         ssa.ACTIONREMARK,
                         ssa.REQUESTREMARK,
                         (
@@ -527,10 +528,10 @@ with DAG(
                             AND i.receiveid = r.receiveid
                             AND r.receivestatus IN ('S', 'C')
                             -- AND i.RECEIVEDATE = TRUNC(SYSDATE)
-                            AND i.RECEIVEDATE >= TO_DATE('20/07/2024', 'DD/MM/YYYY')
-                            AND i.RECEIVEDATE <= TO_DATE('30/07/2024', 'DD/MM/YYYY')
-                            -- and i.receivebookcode not  in('R01','R03','R02','R04')
-                            AND T.SALEID = SSA.SALEID ) AS PAIDCURRENTDATE,
+                                AND i.RECEIVEDATE >= TO_DATE('20/07/2024', 'DD/MM/YYYY')
+                                    AND i.RECEIVEDATE <= TO_DATE('30/07/2024', 'DD/MM/YYYY')
+                                    -- and i.receivebookcode not  in('R01','R03','R02','R04')
+                                        AND T.SALEID = SSA.SALEID ) AS PAIDCURRENTDATE,
                         PT.PRODUCTGROUP,
                         PT.PRODUCTTYPE
                     FROM
@@ -542,7 +543,6 @@ with DAG(
                         XININSURE.SUPPLIER SU,
                         XININSURE.ROUTE R,
                         XININSURE.BRANCH B,
-                        XININSURE.STOCK ST,
                         (
                         SELECT
                             SA.SALEID ,
@@ -566,7 +566,7 @@ with DAG(
                                 --ดำเนินการแล้ว
                                 AND SA.ACTIONSTATUS IN ('R', 'W', 'Y')
                                 -- AND SA.DUEDATE = TRUNC(SYSDATE)
-                                    AND SA.DUEDATE >= TO_DATE('20/07/2024', 'DD/MM/YYYY')
+                                    AND SA.DUEDATE >= TO_DATE('30/07/2022', 'DD/MM/YYYY')
                                         AND SA.DUEDATE <= TO_DATE('30/07/2024', 'DD/MM/YYYY')
                                     ) SSA
                     WHERE
@@ -578,15 +578,15 @@ with DAG(
                         AND P.SUPPLIERID = SU.SUPPLIERID
                         AND P.PRODUCTTYPE = PT.PRODUCTTYPE
                         AND B.BRANCHID = R.BRANCHID
-                        AND ST.SALEID = S.SALEID
                         -- AND PT.PRODUCTGROUP = 'MT'
-                        -- AND SU.SUPPLIERCODE IN ('KWIL', 'AIA', 'SSL', 'BKI', 'BLA', 'VY', 'DHP', 'TVI', 'MTI', 'MTL', 'MLI', 'ALIFE', 'FWD', 'KTAL', 'ACE', 'SELIC', 'PLA', 'TSLI', 'ESY')
+                        --	AND SU.SUPPLIERCODE IN ('KWIL', 'AIA', 'SSL', 'BKI', 'BLA', 'VY', 'DHP', 'TVI', 'MTI', 'MTL', 'MLI', 'ALIFE', 'FWD', 'KTAL', 'ACE', 'SELIC', 'PLA', 'TSLI', 'ESY')
                         --อนุมัติ
                         AND S.PLATEID IS NULL
                         AND S.CANCELDATE IS NULL
                         AND S.CANCELEFFECTIVEDATE IS NULL
                     ORDER BY
-                        s.SALEID DESC """
+                        s.SALEID DESC
+ """
             
             print("Fetching data...")
             cursor.execute(query)
@@ -663,7 +663,7 @@ with DAG(
                         print(f"Insert {i+1}: SALEID={row['SALEID']}, ACTIONID={action_code_insert}")
                         i += 1
 
-                conn.commit() 
+                #conn.commit()  
                 return df
 
         except oracledb.Error as error:
