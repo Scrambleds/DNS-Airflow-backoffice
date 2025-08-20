@@ -1017,13 +1017,13 @@ with DAG(
 
     @task.branch
     def Check_time_result_cancel(**kwargs):
-        current_time = datetime.now(local_tz).time
+        current_time = datetime.now(local_tz).time()
         flg_time = datetime.strptime("15:00", "%H:%M").time()
 
         if (current_time < flg_time):
-            return "result_cancel_before_3pm"
+            return "condition_group.result_cancel_before_3pm"
         else:
-            return "result_cancel_after_3pm"
+            return "condition_group.result_cancel_after_3pm"
 
     @task
     def result_cancel_before_3pm(**kwargs):
