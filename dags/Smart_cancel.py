@@ -29,11 +29,10 @@ local = config.get("variable","tz")
 local_tz = pendulum.timezone(local)
 currentDateAndTime = datetime.now(tz=local_tz)
 currentDate = currentDateAndTime.strftime("%Y-%m-%d")
-
 cmtel_config_str = config.get("variable", "CMTEL_config")
 cmt21_config_str = config.get("variable", "CMT21_config")
-
 invalid_action_codes = config.get("variable", "invalid_action_codes")
+cancel_messages_str = config.get("variable", "cancel_messages")
 
 def ConOracle():
     try:
@@ -732,22 +731,22 @@ with DAG(
                     print(f"Number: {i+1} No ESY02 found for SALEID={saleid} - Added to not_esy")
                 i += 1
 
-                df_result_is_esy = df.loc[valid_indices].copy() if valid_indices else pd.DataFrame()
-                df_result_not_esy = df.loc[not_valid_indices].copy() if not_valid_indices else pd.DataFrame()
+            df_result_is_esy = df.loc[valid_indices].copy() if valid_indices else pd.DataFrame()
+            df_result_not_esy = df.loc[not_valid_indices].copy() if not_valid_indices else pd.DataFrame()
 
-                if not df_result_is_esy.empty and "RESULTCODE" in df_result_is_esy.columns:
-                    df_filter_esy_noresultcode = df_result_is_esy.query("RESULTCODE not in ('XPOL', 'XALL', 'XPRB')")
-                    df_filter_esy_resultcode = df_result_is_esy.query("RESULTCODE in ('XPOL', 'XALL', 'XPRB')")
-                else:
-                    df_filter_esy_noresultcode = pd.DataFrame()
-                    df_filter_esy_resultcode = pd.DataFrame()
+            if not df_result_is_esy.empty and "RESULTCODE" in df_result_is_esy.columns:
+                df_filter_esy_noresultcode = df_result_is_esy.query("RESULTCODE not in ('XPOL', 'XALL', 'XPRB')")
+                df_filter_esy_resultcode = df_result_is_esy.query("RESULTCODE in ('XPOL', 'XALL', 'XPRB')")
+            else:
+                df_filter_esy_noresultcode = pd.DataFrame()
+                df_filter_esy_resultcode = pd.DataFrame()
 
-                if not df_result_not_esy.empty and "RESULTCODE" in df_result_not_esy.columns:
-                    df_filter_notesy_noresultcode = df_result_not_esy.query("RESULTCODE not in ('XPOL', 'XALL', 'XPRB')")
-                    df_filter_notesy_resultcode = df_result_not_esy.query("RESULTCODE in ('XPOL', 'XALL', 'XPRB')")
-                else:
-                    df_filter_notesy_noresultcode = pd.DataFrame()
-                    df_filter_notesy_resultcode = pd.DataFrame()
+            if not df_result_not_esy.empty and "RESULTCODE" in df_result_not_esy.columns:
+                df_filter_notesy_noresultcode = df_result_not_esy.query("RESULTCODE not in ('XPOL', 'XALL', 'XPRB')")
+                df_filter_notesy_resultcode = df_result_not_esy.query("RESULTCODE in ('XPOL', 'XALL', 'XPRB')")
+            else:
+                df_filter_notesy_noresultcode = pd.DataFrame()
+                df_filter_notesy_resultcode = pd.DataFrame()
             
             formatted_table = df.to_markdown(index=False)
             print(f"\n{formatted_table}")
@@ -1039,6 +1038,104 @@ with DAG(
             message = f"Fail with task {task_id} \n error : {e}"
             print(f"Check_payment_date : {e}")
             pass
+        
+    @task
+    def Split_has_remark(**kwargs):
+        ti = kwargs["ti"]
+        task_id = kwargs['task_instance'].task_id
+        try_number = kwargs['task_instance'].try_number
+        message = f"Processing task {task_id} ,try_number {try_number}"
+        print(f"{message}")
+        
+        # ดึงข้อมูลจาก task Split_segment_condition
+        result = ti.xcom_pull(task_ids="get_cancellation_group.Select_esy02_X", key="return_value")
+        df = result.get("df_filter_notesy_resultcode", pd.DataFrame())
+        
+        # อ่าน cancel_messages จาก config
+        cancel_messages = json.loads(cancel_messages_str)
+        
+        try:
+            if df.empty:
+                print("No data to process in Split_has_remark")
+                return {"matched_df": pd.DataFrame(), "unmatched_df": pd.DataFrame()}
+            
+            # สร้าง dictionary เพื่อเก็บผลลัพธ์
+            result_dfs = {}
+            unmatched_df = pd.DataFrame()
+            matched_df = pd.DataFrame()
+            
+            for index, row in df.iterrows():
+                # ตรวจสอบ REQUESTREMARK ก่อน ถ้าไม่มีจึงดู ACTIONREMARK
+                remark_text = ""
+                if pd.notna(row.get("REQUESTREMARK")) and str(row.get("REQUESTREMARK")).strip():
+                    remark_text = str(row.get("REQUESTREMARK")).strip()
+                elif pd.notna(row.get("ACTIONREMARK")) and str(row.get("ACTIONREMARK")).strip():
+                    remark_text = str(row.get("ACTIONREMARK")).strip()
+                
+                if not remark_text:
+                    # ไม่มี remark ให้เพิ่มเข้า unmatched
+                    if unmatched_df.empty:
+                        unmatched_df = row.to_frame().T
+                    else:
+                        unmatched_df = pd.concat([unmatched_df, row.to_frame().T], ignore_index=True)
+                    continue
+                
+                # หารหัสสาเหตุยกเลิกที่ตรงกัน
+                matched_code = None
+                for code, messages in cancel_messages.items():
+                    for message in messages:
+                        if message in remark_text:
+                            matched_code = code
+                            break
+                    if matched_code:
+                        break
+                
+                if matched_code:
+                    # เพิ่มข้อมูลเข้า matched_df
+                    if matched_df.empty:
+                        matched_df = row.to_frame().T
+                    else:
+                        matched_df = pd.concat([matched_df, row.to_frame().T], ignore_index=True)
+                    
+                    # เพิ่มข้อมูลเข้า DataFrame ที่ตรงกับรหัสสาเหตุ (เก็บไว้สำหรับแสดงผล)
+                    if matched_code not in result_dfs:
+                        result_dfs[matched_code] = pd.DataFrame()
+                    
+                    if result_dfs[matched_code].empty:
+                        result_dfs[matched_code] = row.to_frame().T
+                    else:
+                        result_dfs[matched_code] = pd.concat([result_dfs[matched_code], row.to_frame().T], ignore_index=True)
+                    
+                    print(f"SALEID: {row.get('SALEID')} matched with code: {matched_code} for remark: {remark_text}")
+                else:
+                    # ไม่ตรงกับรหัสใดเลย
+                    if unmatched_df.empty:
+                        unmatched_df = row.to_frame().T
+                    else:
+                        unmatched_df = pd.concat([unmatched_df, row.to_frame().T], ignore_index=True)
+                    print(f"SALEID: {row.get('SALEID')} - No matching code found for remark: {remark_text}")
+            
+            # แสดงสรุปผลลัพธ์
+            for code, df_result in result_dfs.items():
+                print(f"Code {code}: {len(df_result)} records")
+                if not df_result.empty:
+                    formatted_table = df_result.to_markdown(index=False)
+                    print(f"\n{formatted_table}")
+            
+            print(f"Total matched records: {len(matched_df)}")
+            print(f"Total unmatched records: {len(unmatched_df)}")
+            
+            # Return แยก matched และ unmatched DataFrame
+            return {
+                "matched_df": matched_df,
+                "unmatched_df": unmatched_df,
+                "result_by_code": result_dfs  # เก็บไว้สำหรับใช้งานแยกตามรหัส (ถ้าต้องการ)
+            }
+            
+        except Exception as e:
+            message = f"Fail with task {task_id} \n error : {e}"
+            print(f"Split_has_remark : {e}")
+            return {"matched_df": pd.DataFrame(), "unmatched_df": pd.DataFrame(), "result_by_code": {}}
 
     @task.branch
     def Check_time_result_cancel(**kwargs):
@@ -1125,11 +1222,12 @@ with DAG(
     def condition_group():
         condition_c_task = Condition_C()
         condition_b_task = Condition_B()
+        Split_has_remark_task = Split_has_remark()
         check_time_result_task = Check_time_result_cancel()
         before_3pm_task = result_cancel_before_3pm()
         after_3pm_task = result_cancel_after_3pm()
         
-        condition_c_task >> condition_b_task >> check_time_result_task >> [before_3pm_task, after_3pm_task]
+        condition_c_task >> condition_b_task >> Split_has_remark_task >> check_time_result_task >> [before_3pm_task, after_3pm_task]
         
     #กำหนด workflow
     (
