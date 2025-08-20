@@ -786,18 +786,30 @@ with DAG(
         result = ti.xcom_pull(task_ids="get_cancellation_group.Select_esy02_X", key="return_value")
         df = result.get("df_filter_esy_noresultcode", pd.DataFrame()) # easy no result code
 
+        print("============ process_esy_no_result_code start ============")
+
         if df.empty:
-            print("No ESY records to process.")
+            print("ESY No : records to process.")
             return None
         
-        actionCode = df["ACTIONCODE"].iloc[0] if not df.empty else None
-        if actionCode not in invalid_action_codes:
+        df_invalid_actions = df[df['ACTIONCODE'].isin(invalid_action_codes)]
+        df_valid_actions = df[~df['ACTIONCODE'].isin(invalid_action_codes)]
+        
+                
+        if not df_valid_actions.empty:
             action_status = "X"
             request_remark = "Auto Cancel MT สินเชื่อ ESY อนุมัติแล้ว ไม่สามารถยกเลิกได้ รบกวนตรวจสอบค่ะ"
-        else:
+            print("============ df_invalid_actions start ============")
+            print(df_valid_actions.head().to_markdown(index=False))
+            Set_action_code(action_status, request_remark, df)
+        
+        if not df_invalid_actions.empty:
             action_status = "W"
             request_remark = "Auto Cancel MT สินเชื่อ ESY อนุมัติแล้ว ไม่สามารถยกเลิกได้ รบกวนตรวจสอบครับ"
-        Set_action_code(action_status, request_remark, df)
+            print("============ df_invalid_actions start ============")
+            print(df_invalid_actions.head().to_markdown(index=False))
+            Set_action_code(action_status, request_remark, df)
+
         return None
     
     @task
@@ -806,18 +818,31 @@ with DAG(
         result = ti.xcom_pull(task_ids="get_cancellation_group.Select_esy02_X", key="return_value")
         df = result.get("df_filter_notesy_noresultcode", pd.DataFrame()) # not easy no result code
 
-        if df.empty:
-            print("No NOT ESY records to process.")
-            return None
+        print("============ process_not_esy_no_result_code start ============")
 
-        actionCode = df["ACTIONCODE"].iloc[0]
-        if actionCode not in invalid_action_codes:
+        if df.empty:
+            print("NOT ESY : No records to process.")
+            return None
+        
+        df_invalid_actions = df[df['ACTIONCODE'].isin(invalid_action_codes)]
+        df_valid_actions = df[~df['ACTIONCODE'].isin(invalid_action_codes)]
+
+        if df_valid_actions.empty:
             action_status = "X"
             request_remark = "Auto Cancel MT รหัสผลที่กำหนดไม่ถูกต้อง ไม่สามารถดำเนินการยกเลิกได้ รบกวนตรวจสอบค่ะ"
-        else:
+            print("============ df_invalid_actions start ============")
+            print(df_valid_actions.head().to_markdown(index=False))
+            Set_action_code(action_status, request_remark, df)
+            print("============ df_invalid_actions end ============")
+
+        if df_invalid_actions.empty:
             action_status = "W"
             request_remark = "Auto Cancel MT รหัสผลที่กำหนดไม่ถูกต้อง ไม่สามารถดำเนินการยกเลิกได้ รบกวนตรวจสอบค่ะ"
-        Set_action_code(action_status, request_remark, df)
+            print("============ df_invalid_actions start ============")
+            print(df_valid_actions.head().to_markdown(index=False))
+            Set_action_code(action_status, request_remark, df)
+            print("============ df_invalid_actions end ============")
+
         return None
     
     @task
