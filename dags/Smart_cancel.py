@@ -561,121 +561,124 @@ with DAG(
         try:
             query = f"""
                         WITH SSA AS (
-                            SELECT
-                                SA.SALEID,
-                                SA.INSTALLMENT,
-                                A.ACTIONID,
-                                A.ACTIONCODE,
-                                SA.ACTIONSTATUS,
-                                SA.RESULTID,
-                                SA.DUEDATE,
-                                SA.ACTIONREMARK,
-                                SA.REQUESTREMARK,
-                                SA.SEQUENCE 
+                                            SELECT
+                                                SA.SALEID,
+                                                SA.INSTALLMENT,
+                                                A.ACTIONID,
+                                                A.ACTIONCODE,
+                                                SA.ACTIONSTATUS,
+                                                SA.RESULTID,
+                                                SA.DUEDATE,
+                                                SA.ACTIONREMARK,
+                                                SA.REQUESTREMARK,
+                                                SA.SEQUENCE 
+                                            FROM
+                                                XININSURE.SALEACTION SA
+                                                JOIN XININSURE.ACTION A ON SA.ACTIONID = A.ACTIONID 
+                                            WHERE
+                                                SA.ACTIONID IN (
+                                                    2261,
+                                                    3740,
+                                                    3741,
+                                                    3742,
+                                                    3743,
+                                                    3760,
+                                                    3761,
+                                                    5933,
+                                                    7533,
+                                                    9133,
+                                                    9174,
+                                                    11293,
+                                                    11574,
+                                                    11575,
+                                                    11576,
+                                                    11577,
+                                                    11553,
+                                                    11554,
+                                                    11555,
+                                                    15014 
+                                                ) 
+                                                AND SA.ACTIONSTATUS IN ( 'R', 'W', 'Y' ) 
+                                    AND SA.DUEDATE BETWEEN TO_DATE ( '03/09/2023', 'DD/MM/YYYY' ) 
+                                    AND TO_DATE ( '03/10/2023', 'DD/MM/YYYY' ) 
+                                ),
+                                PAID AS (
+                                SELECT
+                                    T.SALEID,
+                                    SUM ( I.RECEIVEAMOUNT ) AS PAIDCURRENTDATE 
+                                FROM
+                                    XININSURE.RECEIVEITEMCLEAR T
+                                    JOIN XININSURE.RECEIVEITEM I ON T.RECEIVEID = I.RECEIVEID 
+                                    AND T.RECEIVEITEM = I.RECEIVEITEM
+                                    JOIN XININSURE.RECEIVE R ON I.RECEIVEID = R.RECEIVEID 
+                                WHERE
+                                    R.RECEIVESTATUS IN ( 'S', 'C' ) 
+                                    AND I.RECEIVEDATE BETWEEN TO_DATE ( '03/09/2023', 'DD/MM/YYYY' ) 
+                                    AND TO_DATE ( '03/10/2023', 'DD/MM/YYYY' )
+                                GROUP BY
+                                    T.SALEID
+                                ),
+                                STOCK_RET AS ( SELECT ST.SALEID, MIN ( ST.RETURNDATE ) AS RETURNDATE FROM XININSURE.STOCK ST GROUP BY ST.SALEID ) SELECT
+                                S.SALEID,
+                                XININSURE.GETBOOKNAME ( S.PERIODID, S.SALEBOOKCODE, S.SEQUENCE ) AS BOOKNAME,
+                                S.SALEBOOKCODE,
+                                S.ROUTEID,
+                                B.REGION,
+                                R.ROUTECODE,
+                                S.PAIDAMOUNT,
+                                S.CANCELRESULTID,
+                                ST.RETURNDATE,
+                                SSA.ACTIONREMARK,
+                                SSA.REQUESTREMARK,
+                                SB.BYTECODE AS PAYMENTSTATUS,
+                                S.PAYMENTMODE,
+                                F.STAFFCODE,
+                                F.STAFFTYPE,
+                                F.STAFFCODE || ':' || F.STAFFNAME AS STAFFNAME,
+                                D.DEPARTMENTID,
+                                D.DEPARTMENTCODE || ':' || D.DEPARTMENTNAME AS DEPARTMENTNAME,
+                                D.DEPARTMENTCODE,
+                                D.DEPARTMENTGROUP,
+                                SSA.ACTIONID,
+                                SSA.ACTIONCODE,
+                                SSA.ACTIONSTATUS,
+                                SSA.SEQUENCE,
+                                R.PROVINCECODE,
+                                SSA.RESULTID,
+                                RS.RESULTCODE,
+                                S.MASTERSALEID,
+                                SSA.DUEDATE,
+                                P.PAIDCURRENTDATE,
+                                PT.PRODUCTGROUP,
+                                PT.PRODUCTTYPE, 
+                                S.PRBSTATUS,
+                                S.POLICYSTATUS,
+                                S.SALESTATUS
                             FROM
-                                XININSURE.SALEACTION SA
-                                JOIN XININSURE.ACTION A ON SA.ACTIONID = A.ACTIONID 
+                                XININSURE.sale S
+                                JOIN SSA ON S.SALEID = SSA.SALEID
+                                JOIN XININSURE.STAFF F ON S.STAFFID = F.STAFFID
+                                JOIN XININSURE.DEPARTMENT D ON S.STAFFDEPARTMENTID = D.DEPARTMENTID
+                                JOIN XININSURE.PRODUCT P ON S.PRODUCTID = P.PRODUCTID
+                                JOIN XININSURE.PRODUCTTYPE PT ON P.PRODUCTTYPE = PT.PRODUCTTYPE
+                                JOIN XININSURE.SUPPLIER SU ON P.SUPPLIERID = SU.SUPPLIERID
+                                JOIN XININSURE.ROUTE R ON S.ROUTEID = R.ROUTEID
+                                JOIN XININSURE.BRANCH B ON R.BRANCHID = B.BRANCHID
+                                LEFT JOIN STOCK_RET ST ON S.SALEID = ST.SALEID
+                                LEFT JOIN PAID P ON SSA.SALEID = P.SALEID
+                                LEFT JOIN XININSURE.SYSBYTEDES SB ON SB.COLUMNNAME = 'PAYMENTSTATUS' 
+                                AND SB.TABLENAME = 'SALE' 
+                                AND SB.BYTECODE = S.PAYMENTSTATUS
+                                LEFT JOIN XININSURE.RESULT RS ON RS.RESULTID = SSA.RESULTID 
                             WHERE
-                                SA.ACTIONID IN (
-                                    2261,
-                                    3740,
-                                    3741,
-                                    3742,
-                                    3743,
-                                    3760,
-                                    3761,
-                                    5933,
-                                    7533,
-                                    9133,
-                                    9174,
-                                    11293,
-                                    11574,
-                                    11575,
-                                    11576,
-                                    11577,
-                                    11553,
-                                    11554,
-                                    11555,
-                                    15014 
-                                ) 
-                                AND SA.ACTIONSTATUS IN ( 'R', 'W', 'Y' ) 
-                                AND SA.DUEDATE BETWEEN TO_DATE ( '03/09/2023', 'DD/MM/YYYY' ) 
-                                AND TO_DATE ( '03/10/2023', 'DD/MM/YYYY' ) 
-                            ),
-                            PAID AS (
-                            SELECT
-                                T.SALEID,
-                                SUM ( I.RECEIVEAMOUNT ) AS PAIDCURRENTDATE 
-                            FROM
-                                XININSURE.RECEIVEITEMCLEAR T
-                                JOIN XININSURE.RECEIVEITEM I ON T.RECEIVEID = I.RECEIVEID 
-                                AND T.RECEIVEITEM = I.RECEIVEITEM
-                                JOIN XININSURE.RECEIVE R ON I.RECEIVEID = R.RECEIVEID 
-                            WHERE
-                                R.RECEIVESTATUS IN ( 'S', 'C' ) 
-                                AND I.RECEIVEDATE BETWEEN TO_DATE ( '03/09/2023', 'DD/MM/YYYY' ) 
-                                AND TO_DATE ( '03/10/2023', 'DD/MM/YYYY' )
-                            GROUP BY
-                                T.SALEID
-                            ),
-                            STOCK_RET AS ( SELECT ST.SALEID, MIN ( ST.RETURNDATE ) AS RETURNDATE FROM XININSURE.STOCK ST GROUP BY ST.SALEID ) SELECT
-                            S.SALEID,
-                            XININSURE.GETBOOKNAME ( S.PERIODID, S.SALEBOOKCODE, S.SEQUENCE ) AS BOOKNAME,
-                            S.SALEBOOKCODE,
-                            S.ROUTEID,
-                            B.REGION,
-                            R.ROUTECODE,
-                            S.PAIDAMOUNT,
-                            S.CANCELRESULTID,
-                            ST.RETURNDATE,
-                            SSA.ACTIONREMARK,
-                            SSA.REQUESTREMARK,
-                            SB.BYTECODE AS PAYMENTSTATUS,
-                            S.PAYMENTMODE,
-                            F.STAFFCODE,
-                            F.STAFFTYPE,
-                            F.STAFFCODE || ':' || F.STAFFNAME AS STAFFNAME,
-                            D.DEPARTMENTID,
-                            D.DEPARTMENTCODE || ':' || D.DEPARTMENTNAME AS DEPARTMENTNAME,
-                            D.DEPARTMENTCODE,
-                            D.DEPARTMENTGROUP,
-                            SSA.ACTIONID,
-                            SSA.ACTIONCODE,
-                            SSA.ACTIONSTATUS,
-                            SSA.SEQUENCE,
-                            R.PROVINCECODE,
-                            SSA.RESULTID,
-                            RS.RESULTCODE,
-                            S.MASTERSALEID,
-                            SSA.DUEDATE,
-                            P.PAIDCURRENTDATE,
-                            PT.PRODUCTGROUP,
-                            PT.PRODUCTTYPE 
-                        FROM
-                            XININSURE.sale S
-                            JOIN SSA ON S.SALEID = SSA.SALEID
-                            JOIN XININSURE.STAFF F ON S.STAFFID = F.STAFFID
-                            JOIN XININSURE.DEPARTMENT D ON S.STAFFDEPARTMENTID = D.DEPARTMENTID
-                            JOIN XININSURE.PRODUCT P ON S.PRODUCTID = P.PRODUCTID
-                            JOIN XININSURE.PRODUCTTYPE PT ON P.PRODUCTTYPE = PT.PRODUCTTYPE
-                            JOIN XININSURE.SUPPLIER SU ON P.SUPPLIERID = SU.SUPPLIERID
-                            JOIN XININSURE.ROUTE R ON S.ROUTEID = R.ROUTEID
-                            JOIN XININSURE.BRANCH B ON R.BRANCHID = B.BRANCHID
-                            LEFT JOIN STOCK_RET ST ON S.SALEID = ST.SALEID
-                            LEFT JOIN PAID P ON SSA.SALEID = P.SALEID
-                            LEFT JOIN XININSURE.SYSBYTEDES SB ON SB.COLUMNNAME = 'PAYMENTSTATUS' 
-                            AND SB.TABLENAME = 'SALE' 
-                            AND SB.BYTECODE = S.PAYMENTSTATUS
-                            LEFT JOIN XININSURE.RESULT RS ON RS.RESULTID = SSA.RESULTID 
-                        WHERE
-                            S.PLATEID IS NOT NULL 
-                            AND S.CANCELDATE IS NULL 
-                            AND S.CANCELEFFECTIVEDATE IS NULL
-                            AND S.POLICYSTATUS = 'A'
-                            OR S.PRBSTATUS = 'A'
-                            AND S.SALESTATUS = 'O'
-                        ORDER BY
-                            S.SALEID DESC
+                                S.PLATEID IS NOT NULL 
+                                AND S.CANCELDATE IS NULL 
+                                AND S.CANCELEFFECTIVEDATE IS NULL
+                                AND S.POLICYSTATUS = 'A'
+                                OR S.PRBSTATUS = 'A'
+                                AND S.SALESTATUS = 'O'
+                            ORDER BY
+                                S.SALEID DESC
  """
             
             print("Fetching data...")
@@ -1285,6 +1288,65 @@ with DAG(
         except Exception as e:
             print(f"Exception in result_cancel_after_3pm: {e}")
         return None
+    
+    # @task
+    # def update_leadbypassrequest_status(**kwargs):
+    #     ti = kwargs["ti"]
+    #     task_id = kwargs['task_instance'].task_id
+    #     try_number = kwargs['task_instance'].try_number
+    #     message = f"Processing task {task_id} ,try_number {try_number}"
+    #     # print(f"{message}")
+    #     # send_flex_notification_start(message)
+        
+    #     result = ti.xcom_pull(task_ids="Process_x.Get_dnc_work", key="return_value")
+        
+    #     # แสดงผลลัพธ์ที่ดึงมาจาก XCom
+    #     print("XCom result from Get_dnc_work:", result)
+        
+    #     df = result["Get_dnc_work"]
+        
+    #     cursor, conn = ConOracle()
+        
+    #     try:
+    #         if df is None or df.empty:
+    #             print("DataFrame is empty. Exiting task.")
+    #             return {"Update_x_sum": df}
+    #         else:
+    #             update_status_query_X = """
+    #                     UPDATE TQMSALE.LEADBYPASSREQUEST Q
+    #                     SET Q.BYPASSSTATUS = 'X'
+    #                     WHERE Q.LEADID = :leadid
+    #                     AND Q.LEADASSIGNID = :leadassignid
+    #                     AND Q.BYPASSSTATUS = 'H'
+    #                 """
+                    
+    #             i = 0
+    #             for index, row in df.iterrows():
+    #                 cursor.execute(update_status_query_X, {'leadid': row['LEADID'], 'leadassignid': row['LEADASSIGNID']})
+    #                 print(f"Number: {i+1} Updated Bypassstatus to X row {index}: leadid={row['LEADID']}, leadassignid={row['LEADASSIGNID']}")
+    #                 i+=1
+                    
+    #             update_status_query_N = """
+    #                     UPDATE TQMSALE.LEADASSIGN a
+    #                     SET a.ASSIGNSTATUS = 'N'
+    #                     WHERE a.LEADID = :leadid
+    #                     AND a.LEADASSIGNID = :leadassignid
+    #                     AND a.ASSIGNSTATUS NOT IN ('N')
+    #                 """
+                    
+    #             i = 0
+    #             for index, row in df.iterrows():
+    #                 cursor.execute(update_status_query_N, {'leadid': row['LEADID'], 'leadassignid': row['LEADASSIGNID']})
+    #                 print(f"Number: {i+1} Updated Assignstatus to N row {index}: leadid={row['LEADID']}, leadassignid={row['LEADASSIGNID']}")
+    #                 i+=1
+                
+    #             conn.commit() 
+    #             print("All updates committed successfully.")
+    #             formatted_table = df.to_markdown(index=False)
+    #             print(f"\n{formatted_table}")
+    #             message = f"จำนวนรายการที่ปรับสถานะรวม {df} รายการ"
+    #             print(message)
+    #             return {"Update_x_sum": df}
 
     #Dummy
     start = EmptyOperator(task_id="start_dag", trigger_rule="none_failed_min_one_success")
