@@ -24,6 +24,7 @@ from linebot import LineBotApi
 from linebot.exceptions import LineBotApiError
 from linebot.models import TextSendMessage
 from linebot.models import FlexSendMessage
+import asyncio
 # import cx_Oracle
 
 config_file_path = 'config/Smart_cancel.cfg'
@@ -133,7 +134,7 @@ def send_flex_notification_start(message=None):
 
 def ConOracle():
     try:
-        env = os.getenv('ENV', 'xininsure_dev')
+        env = os.getenv('ENV', 'xininsure_preprod_demo')
         db_host = config.get(env, 'host_xininsure')
         db_port = config.get(env, 'port_xininsure')
         db_username = config.get(env, 'username_xininsure')
@@ -559,130 +560,122 @@ with DAG(
         cursor, conn = ConOracle()
         try:
             query = f"""
-                        SELECT 
-                        S.SALEID,
-                        xininsure.getbookname(s.periodid,
-                        s.salebookcode,
-                        s.sequence) AS bookname,
-                        s.salebookcode,
-                        s.routeid ,
-                        B.region,
-                        r.routecode,
-                        s.paidamount,
-                        s.cancelresultid,
-                        (SELECT st.RETURNDATE FROM STOCK st WHERE ST.SALEID = S.SALEID FETCH FIRST 1 ROWS ONLY) AS RETURNDATE,
-                        ssa.ACTIONREMARK,
-                        ssa.REQUESTREMARK,
-                        (
-                        SELECT
-                            SB.BYTECODE
+                        WITH SSA AS (
+                            SELECT
+                                SA.SALEID,
+                                SA.INSTALLMENT,
+                                A.ACTIONID,
+                                A.ACTIONCODE,
+                                SA.ACTIONSTATUS,
+                                SA.RESULTID,
+                                SA.DUEDATE,
+                                SA.ACTIONREMARK,
+                                SA.REQUESTREMARK,
+                                SA.SEQUENCE 
+                            FROM
+                                XININSURE.SALEACTION SA
+                                JOIN XININSURE.ACTION A ON SA.ACTIONID = A.ACTIONID 
+                            WHERE
+                                SA.ACTIONID IN (
+                                    2261,
+                                    3740,
+                                    3741,
+                                    3742,
+                                    3743,
+                                    3760,
+                                    3761,
+                                    5933,
+                                    7533,
+                                    9133,
+                                    9174,
+                                    11293,
+                                    11574,
+                                    11575,
+                                    11576,
+                                    11577,
+                                    11553,
+                                    11554,
+                                    11555,
+                                    15014 
+                                ) 
+                                AND SA.ACTIONSTATUS IN ( 'R', 'W', 'Y' ) 
+                                AND SA.DUEDATE BETWEEN TO_DATE ( '03/09/2023', 'DD/MM/YYYY' ) 
+                                AND TO_DATE ( '03/10/2023', 'DD/MM/YYYY' ) 
+                            ),
+                            PAID AS (
+                            SELECT
+                                T.SALEID,
+                                SUM ( I.RECEIVEAMOUNT ) AS PAIDCURRENTDATE 
+                            FROM
+                                XININSURE.RECEIVEITEMCLEAR T
+                                JOIN XININSURE.RECEIVEITEM I ON T.RECEIVEID = I.RECEIVEID 
+                                AND T.RECEIVEITEM = I.RECEIVEITEM
+                                JOIN XININSURE.RECEIVE R ON I.RECEIVEID = R.RECEIVEID 
+                            WHERE
+                                R.RECEIVESTATUS IN ( 'S', 'C' ) 
+                                AND I.RECEIVEDATE BETWEEN TO_DATE ( '03/09/2023', 'DD/MM/YYYY' ) 
+                                AND TO_DATE ( '03/10/2023', 'DD/MM/YYYY' )
+                            GROUP BY
+                                T.SALEID
+                            ),
+                            STOCK_RET AS ( SELECT ST.SALEID, MIN ( ST.RETURNDATE ) AS RETURNDATE FROM XININSURE.STOCK ST GROUP BY ST.SALEID ) SELECT
+                            S.SALEID,
+                            XININSURE.GETBOOKNAME ( S.PERIODID, S.SALEBOOKCODE, S.SEQUENCE ) AS BOOKNAME,
+                            S.SALEBOOKCODE,
+                            S.ROUTEID,
+                            B.REGION,
+                            R.ROUTECODE,
+                            S.PAIDAMOUNT,
+                            S.CANCELRESULTID,
+                            ST.RETURNDATE,
+                            SSA.ACTIONREMARK,
+                            SSA.REQUESTREMARK,
+                            SB.BYTECODE AS PAYMENTSTATUS,
+                            S.PAYMENTMODE,
+                            F.STAFFCODE,
+                            F.STAFFTYPE,
+                            F.STAFFCODE || ':' || F.STAFFNAME AS STAFFNAME,
+                            D.DEPARTMENTID,
+                            D.DEPARTMENTCODE || ':' || D.DEPARTMENTNAME AS DEPARTMENTNAME,
+                            D.DEPARTMENTCODE,
+                            D.DEPARTMENTGROUP,
+                            SSA.ACTIONID,
+                            SSA.ACTIONCODE,
+                            SSA.ACTIONSTATUS,
+                            SSA.SEQUENCE,
+                            R.PROVINCECODE,
+                            SSA.RESULTID,
+                            RS.RESULTCODE,
+                            S.MASTERSALEID,
+                            SSA.DUEDATE,
+                            P.PAIDCURRENTDATE,
+                            PT.PRODUCTGROUP,
+                            PT.PRODUCTTYPE 
                         FROM
-                            XININSURE.SYSBYTEDES SB
+                            XININSURE.sale S
+                            JOIN SSA ON S.SALEID = SSA.SALEID
+                            JOIN XININSURE.STAFF F ON S.STAFFID = F.STAFFID
+                            JOIN XININSURE.DEPARTMENT D ON S.STAFFDEPARTMENTID = D.DEPARTMENTID
+                            JOIN XININSURE.PRODUCT P ON S.PRODUCTID = P.PRODUCTID
+                            JOIN XININSURE.PRODUCTTYPE PT ON P.PRODUCTTYPE = PT.PRODUCTTYPE
+                            JOIN XININSURE.SUPPLIER SU ON P.SUPPLIERID = SU.SUPPLIERID
+                            JOIN XININSURE.ROUTE R ON S.ROUTEID = R.ROUTEID
+                            JOIN XININSURE.BRANCH B ON R.BRANCHID = B.BRANCHID
+                            LEFT JOIN STOCK_RET ST ON S.SALEID = ST.SALEID
+                            LEFT JOIN PAID P ON SSA.SALEID = P.SALEID
+                            LEFT JOIN XININSURE.SYSBYTEDES SB ON SB.COLUMNNAME = 'PAYMENTSTATUS' 
+                            AND SB.TABLENAME = 'SALE' 
+                            AND SB.BYTECODE = S.PAYMENTSTATUS
+                            LEFT JOIN XININSURE.RESULT RS ON RS.RESULTID = SSA.RESULTID 
                         WHERE
-                            SB.COLUMNNAME = 'PAYMENTSTATUS'
-                            AND SB.TABLENAME = 'SALE'
-                            AND SB.BYTECODE = S.PAYMENTSTATUS) AS PAYMENTSTATUS,
-                        S.PAYMENTMODE,
-                        F.STAFFCODE,
-                        F.STAFFTYPE,
-                        F.STAFFCODE || ':' || F.STAFFNAME AS STAFFNAME,
-                        D.DEPARTMENTID,
-                        D.DEPARTMENTCODE || ':' || D.DEPARTMENTNAME AS DEPARTMENTNAME,
-                        D.DEPARTMENTCODE,
-                        D.DEPARTMENTGROUP,
-                        ssa.actionid,
-                        ssa.actioncode,
-                        ssa.actionstatus,
-                        ssa.SEQUENCE,
-                        (
-                        SELECT
-                            r.PROVINCECODE
-                        FROM
-                            XININSURE.ROUTE r
-                        WHERE
-                            s.ROUTEID = r.ROUTEID) AS PROVINCECODE,
-                        ssa.RESULTID,
-                        (
-                        SELECT
-                            r.RESULTCODE
-                        FROM
-                            XININSURE.RESULT r
-                        WHERE
-                            r.RESULTID = ssa.RESULTID) AS RESULTCODE,
-                        S.MASTERSALEID,
-                        ssa.duedate,
-                        (
-                        SELECT
-                            -- i.*
-                            SUM(i.RECEIVEAMOUNT)
-                        FROM
-                            XININSURE.RECEIVEITEMCLEAR T, 
-                                xininsure.receiveitem i,
-                                xininsure.receive r
-                        WHERE
-                            t.receiveid = i.receiveid
-                            AND t.receiveitem = i.receiveitem
-                            AND i.receiveid = r.receiveid
-                            AND r.receivestatus IN ('S', 'C')
-                            -- AND i.RECEIVEDATE = TRUNC(SYSDATE)
-                                AND i.RECEIVEDATE >= TO_DATE('20/07/2024', 'DD/MM/YYYY')
-                                    AND i.RECEIVEDATE <= TO_DATE('30/07/2024', 'DD/MM/YYYY')
-                                    -- and i.receivebookcode not  in('R01','R03','R02','R04')
-                                        AND T.SALEID = SSA.SALEID ) AS PAIDCURRENTDATE,
-                        PT.PRODUCTGROUP,
-                        PT.PRODUCTTYPE
-                    FROM
-                        XININSURE.SALE S,
-                        XININSURE.STAFF F,
-                        XININSURE.DEPARTMENT D,
-                        XININSURE.PRODUCT P,
-                        XININSURE.PRODUCTTYPE PT,
-                        XININSURE.SUPPLIER SU,
-                        XININSURE.ROUTE R,
-                        XININSURE.BRANCH B,
-                        (
-                        SELECT
-                            SA.SALEID ,
-                            SA.INSTALLMENT,
-                            a.actionid,
-                            a.actioncode ,
-                            sa.actionstatus,
-                            sa.RESULTID,
-                            sa.duedate,
-                            sa.ACTIONREMARK,
-                            sa.REQUESTREMARK,
-                            sa.sequence
-                        FROM
-                            XININSURE.SALEACTION SA,
-                            xininsure.action a
-                        WHERE
-                            SA.ACTIONID IN(3760, 3761, 2261, 3740, 3741, 3742, 3743,
-                                        5933, 11293, 7533, 9133, 9174, 11574, 11575, 11576, 
-                                        11577, 11553, 11554, 11555, 15014)
-                                AND sa.actionid = a.actionid
-                                --ดำเนินการแล้ว
-                                AND SA.ACTIONSTATUS IN ('R', 'W', 'Y')
-                                -- AND SA.DUEDATE = TRUNC(SYSDATE)
-                                    AND SA.DUEDATE >= TO_DATE('20/07/2024', 'DD/MM/YYYY')
-                                        AND SA.DUEDATE <= TO_DATE('30/07/2024', 'DD/MM/YYYY')
-                                    ) SSA
-                    WHERE
-                        S.SALEID = SSA.SALEID
-                        AND S.STAFFID = F.STAFFID
-                        AND S.STAFFDEPARTMENTID = D.DEPARTMENTID
-                        AND S.ROUTEID = R.ROUTEID
-                        AND S.PRODUCTID = P.PRODUCTID
-                        AND P.SUPPLIERID = SU.SUPPLIERID
-                        AND P.PRODUCTTYPE = PT.PRODUCTTYPE
-                        AND B.BRANCHID = R.BRANCHID
-                        -- AND PT.PRODUCTGROUP = 'MT'
-                        --	AND SU.SUPPLIERCODE IN ('KWIL', 'AIA', 'SSL', 'BKI', 'BLA', 'VY', 'DHP', 'TVI', 'MTI', 'MTL', 'MLI', 'ALIFE', 'FWD', 'KTAL', 'ACE', 'SELIC', 'PLA', 'TSLI', 'ESY')
-                        --อนุมัติ
-                        AND S.PLATEID IS NULL
-                        AND S.CANCELDATE IS NULL
-                        AND S.CANCELEFFECTIVEDATE IS NULL
-                    ORDER BY
-                        s.SALEID DESC
+                            S.PLATEID IS NOT NULL 
+                            AND S.CANCELDATE IS NULL 
+                            AND S.CANCELEFFECTIVEDATE IS NULL
+                            AND S.POLICYSTATUS = 'A'
+                            OR S.PRBSTATUS = 'A'
+                            AND S.SALESTATUS = 'O'
+                        ORDER BY
+                            S.SALEID DESC
  """
             
             print("Fetching data...")
@@ -777,6 +770,208 @@ with DAG(
             cursor.close()
             conn.close() 
         
+    # @task
+    # def Select_esy02_X(**kwargs):
+    #     cursor, conn = ConOracle()
+    #     ti = kwargs["ti"]
+    #     result = ti.xcom_pull(task_ids="get_cancellation_group.Get_cancelled_work", key="return_value")
+    #     df = result.get("df_cancel_work", pd.DataFrame())
+
+    #     print("==== df_cancel_work ====")
+    #     print(df.head().to_markdown(index=False))
+
+    #     if cursor is None or conn is None:
+    #         return pd.DataFrame()
+
+    #     try:
+    #         if df.empty:
+    #             print("DataFrame is empty.")
+    #             return pd.DataFrame()
+
+    #         # 1. ดึง SALEID ที่เข้าเงื่อนไข ESY02 ทั้งหมดในรอบเดียว
+    #         saleids = tuple(df['SALEID'].unique())
+    #         if not saleids:
+    #             return pd.DataFrame()
+
+    #         check_esy02_query = f"""
+    #             SELECT S.SALEID
+    #             FROM XININSURE.SALE S
+    #             INNER JOIN XININSURE.SALEACTION sa ON S.SALEID = sa.SALEID
+    #             INNER JOIN XININSURE.ACTION a ON sa.ACTIONID = a.ACTIONID
+    #             WHERE S.SALEID IN ({','.join([':id'+str(i) for i in range(len(saleids))])})
+    #             AND sa.ACTIONSTATUS = 'Y'
+    #             AND a.ACTIONCODE = 'ESY02'
+    #             AND sa.sequence = (
+    #                 SELECT MAX(sa_max.sequence) FROM XININSURE.SALEACTION sa_max
+    #                 INNER JOIN XININSURE.ACTION a_max ON sa_max.ACTIONID = a_max.ACTIONID
+    #                 WHERE sa_max.SALEID = sa.SALEID AND sa_max.ACTIONSTATUS = 'Y' 
+    #                 AND a_max.ACTIONCODE = 'ESY02'
+    #             )
+    #             AND S.PLATEID IS NULL
+    #             AND S.CANCELDATE IS NULL
+    #             AND S.CANCELEFFECTIVEDATE IS NULL
+    #         """
+    #         params = {f'id{i}': v for i, v in enumerate(saleids)}
+    #         cursor.execute(check_esy02_query, params)
+    #         esy02_saleids = set(row[0] for row in cursor.fetchall())
+
+    #         # 2. แบ่งกลุ่มใน Pandas
+    #         df_result_is_esy = df[df['SALEID'].isin(esy02_saleids)].copy()
+    #         df_result_not_esy = df[~df['SALEID'].isin(esy02_saleids)].copy()
+
+    #         print("==== df_result_is_esy ====")
+    #         print(df_result_is_esy.head().to_markdown(index=False))
+    #         print("==== end df_result_is_esy ====")
+
+    #         if not df_result_is_esy.empty and "RESULTCODE" in df_result_is_esy.columns:
+    #             df_filter_esy_noresultcode = df_result_is_esy.query("RESULTCODE not in ('XPOL', 'XALL', 'XPRB')")
+    #             df_filter_esy_resultcode = df_result_is_esy.query("RESULTCODE in ('XPOL', 'XALL', 'XPRB')")
+    #         else:
+    #             df_filter_esy_noresultcode = pd.DataFrame()
+    #             df_filter_esy_resultcode = pd.DataFrame()
+
+    #         if not df_result_not_esy.empty and "RESULTCODE" in df_result_not_esy.columns:
+    #             df_filter_notesy_noresultcode = df_result_not_esy.query("RESULTCODE not in ('XPOL', 'XALL', 'XPRB')")
+    #             df_filter_notesy_resultcode = df_result_not_esy.query("RESULTCODE in ('XPOL', 'XALL', 'XPRB')")
+    #         else:
+    #             df_filter_notesy_noresultcode = pd.DataFrame()
+    #             df_filter_notesy_resultcode = pd.DataFrame()
+
+    #         formatted_table = df.to_markdown(index=False)
+    #         print(f"\n{formatted_table}")
+    #         print(f"Select ESY02 data successfully")
+    #         print(f"Total records found: {len(df)}")
+    #         print(f"Total SALEIDs checked: {len(df)}")
+    #         print(f"Total is esy no_result_code = {df_filter_esy_noresultcode}")
+
+    #         print(f"Total is esy has_result_code = {df_filter_esy_resultcode}")
+    #         print(f"Total not esy no_result_code = {df_filter_notesy_noresultcode}")
+    #         print(f"Total not esy has_result_code = {df_filter_notesy_resultcode}")
+
+    #         request_remark = "Auto Cancel MT สินเชื่อ ESY อนุมัติแล้วไม่สามารถยกเลิกได้ รบกวนตรวจสอบค่ะ"
+    #         action_status = "X"
+
+    #         conn.commit()
+
+    #         return {
+    #             'action_status': action_status,
+    #             'request_remark': request_remark,
+    #             'df_filter_esy_noresultcode': df_filter_esy_noresultcode,
+    #             'df_filter_esy_resultcode': df_filter_esy_resultcode,
+    #             'df_filter_notesy_noresultcode': df_filter_notesy_noresultcode,
+    #             'df_filter_notesy_resultcode': df_filter_notesy_resultcode
+    #         }
+
+    #     except oracledb.Error as error:
+    #         conn.rollback()
+    #         message = f'เกิดข้อผิดพลาด : {error}'
+    #         print(message)
+    #         return pd.DataFrame()
+    #     finally:
+    #         cursor.close()
+    #         conn.close()
+
+    # @task
+    # def Select_esy02_X(**kwargs):
+    #     cursor, conn = ConOracle()
+    #     ti = kwargs["ti"]
+    #     result = ti.xcom_pull(task_ids="get_cancellation_group.Get_cancelled_work", key="return_value")
+    #     df = result.get("df_cancel_work", pd.DataFrame())
+
+    #     print("==== df_cancel_work ====")
+    #     print(df.head().to_markdown(index=False))
+
+    #     if cursor is None or conn is None:
+    #         return pd.DataFrame()
+
+    #     try:
+    #         if df.empty:
+    #             print("DataFrame is empty.")
+    #             return pd.DataFrame()
+
+    #         # 1. ดึง SALEID ที่เข้าเงื่อนไข ESY02 ทั้งหมดในรอบเดียว
+    #         saleids = tuple(df['SALEID'].unique())
+    #         if not saleids:
+    #             return pd.DataFrame()
+
+    #         check_esy02_query = f"""
+    #             SELECT S.SALEID
+    #             FROM XININSURE.SALE S
+    #             INNER JOIN XININSURE.SALEACTION sa ON S.SALEID = sa.SALEID
+    #             INNER JOIN XININSURE.ACTION a ON sa.ACTIONID = a.ACTIONID
+    #             WHERE S.SALEID IN ({','.join([':id'+str(i) for i in range(len(saleids))])})
+    #             AND sa.ACTIONSTATUS = 'Y'
+    #             AND a.ACTIONCODE = 'ESY02'
+    #             AND sa.sequence = (
+    #                 SELECT MAX(sa_max.sequence) FROM XININSURE.SALEACTION sa_max
+    #                 INNER JOIN XININSURE.ACTION a_max ON sa_max.ACTIONID = a_max.ACTIONID
+    #                 WHERE sa_max.SALEID = sa.SALEID AND sa_max.ACTIONSTATUS = 'Y' 
+    #                 AND a_max.ACTIONCODE = 'ESY02'
+    #             )
+    #             AND S.PLATEID IS NULL
+    #             AND S.CANCELDATE IS NULL
+    #             AND S.CANCELEFFECTIVEDATE IS NULL
+    #         """
+    #         params = {f'id{i}': v for i, v in enumerate(saleids)}
+    #         cursor.execute(check_esy02_query, params)
+    #         esy02_saleids = set(row[0] for row in cursor.fetchall())
+
+    #         # 2. แบ่งกลุ่มใน Pandas
+    #         df_result_is_esy = df[df['SALEID'].isin(esy02_saleids)].copy()
+    #         df_result_not_esy = df[~df['SALEID'].isin(esy02_saleids)].copy()
+
+    #         print("==== df_result_is_esy ====")
+    #         print(df_result_is_esy.head().to_markdown(index=False))
+    #         print("==== end df_result_is_esy ====")
+
+    #         if not df_result_is_esy.empty and "RESULTCODE" in df_result_is_esy.columns:
+    #             df_filter_esy_noresultcode = df_result_is_esy.query("RESULTCODE not in ('XPOL', 'XALL', 'XPRB')")
+    #             df_filter_esy_resultcode = df_result_is_esy.query("RESULTCODE in ('XPOL', 'XALL', 'XPRB')")
+    #         else:
+    #             df_filter_esy_noresultcode = pd.DataFrame()
+    #             df_filter_esy_resultcode = pd.DataFrame()
+
+    #         if not df_result_not_esy.empty and "RESULTCODE" in df_result_not_esy.columns:
+    #             df_filter_notesy_noresultcode = df_result_not_esy.query("RESULTCODE not in ('XPOL', 'XALL', 'XPRB')")
+    #             df_filter_notesy_resultcode = df_result_not_esy.query("RESULTCODE in ('XPOL', 'XALL', 'XPRB')")
+    #         else:
+    #             df_filter_notesy_noresultcode = pd.DataFrame()
+    #             df_filter_notesy_resultcode = pd.DataFrame()
+
+    #         formatted_table = df.to_markdown(index=False)
+    #         print(f"\n{formatted_table}")
+    #         print(f"Select ESY02 data successfully")
+    #         print(f"Total records found: {len(df)}")
+    #         print(f"Total SALEIDs checked: {len(df)}")
+    #         print(f"Total is esy no_result_code = {df_filter_esy_noresultcode}")
+
+    #         print(f"Total is esy has_result_code = {df_filter_esy_resultcode}")
+    #         print(f"Total not esy no_result_code = {df_filter_notesy_noresultcode}")
+    #         print(f"Total not esy has_result_code = {df_filter_notesy_resultcode}")
+
+    #         request_remark = "Auto Cancel MT สินเชื่อ ESY อนุมัติแล้วไม่สามารถยกเลิกได้ รบกวนตรวจสอบค่ะ"
+    #         action_status = "X"
+
+    #         conn.commit()
+
+    #         return {
+    #             'action_status': action_status,
+    #             'request_remark': request_remark,
+    #             'df_filter_esy_noresultcode': df_filter_esy_noresultcode,
+    #             'df_filter_esy_resultcode': df_filter_esy_resultcode,
+    #             'df_filter_notesy_noresultcode': df_filter_notesy_noresultcode,
+    #             'df_filter_notesy_resultcode': df_filter_notesy_resultcode
+    #         }
+
+    #     except oracledb.Error as error:
+    #         conn.rollback()
+    #         message = f'เกิดข้อผิดพลาด : {error}'
+    #         print(message)
+    #         return pd.DataFrame()
+    #     finally:
+    #         cursor.close()
+    #         conn.close()
+
     @task
     def Select_esy02_X(**kwargs):
         cursor, conn = ConOracle()
@@ -795,32 +990,43 @@ with DAG(
                 print("DataFrame is empty.")
                 return pd.DataFrame()
 
-            # 1. ดึง SALEID ที่เข้าเงื่อนไข ESY02 ทั้งหมดในรอบเดียว
-            saleids = tuple(df['SALEID'].unique())
+            saleids = [int(x) for x in df['SALEID'].unique()]
             if not saleids:
                 return pd.DataFrame()
 
-            check_esy02_query = f"""
-                SELECT S.SALEID
-                FROM XININSURE.SALE S
-                INNER JOIN XININSURE.SALEACTION sa ON S.SALEID = sa.SALEID
-                INNER JOIN XININSURE.ACTION a ON sa.ACTIONID = a.ACTIONID
-                WHERE S.SALEID IN ({','.join([':id'+str(i) for i in range(len(saleids))])})
-                AND sa.ACTIONSTATUS = 'Y'
-                AND a.ACTIONCODE = 'ESY02'
-                AND sa.sequence = (
-                    SELECT MAX(sa_max.sequence) FROM XININSURE.SALEACTION sa_max
-                    INNER JOIN XININSURE.ACTION a_max ON sa_max.ACTIONID = a_max.ACTIONID
-                    WHERE sa_max.SALEID = sa.SALEID AND sa_max.ACTIONSTATUS = 'Y' 
-                    AND a_max.ACTIONCODE = 'ESY02'
-                )
-                AND S.PLATEID IS NULL
-                AND S.CANCELDATE IS NULL
-                AND S.CANCELEFFECTIVEDATE IS NULL
-            """
-            params = {f'id{i}': v for i, v in enumerate(saleids)}
-            cursor.execute(check_esy02_query, params)
-            esy02_saleids = set(row[0] for row in cursor.fetchall())
+            batch_size = 5
+            esy02_saleids = set()
+            for i in range(0, len(saleids), batch_size):
+                batch = saleids[i:i+batch_size]
+                placeholders = ','.join([f':id{j}' for j in range(len(batch))])
+                check_esy02_query = f"""       
+                    WITH RankedActions AS (
+                                            SELECT 
+                                                S.SALEID,
+                                                sa.SEQUENCE,
+                                                ROW_NUMBER() OVER (
+                                                    PARTITION BY S.SALEID 
+                                                    ORDER BY sa.SEQUENCE DESC
+                                                ) as rn
+                                            FROM XININSURE.SALE S
+                                            INNER JOIN XININSURE.SALEACTION sa ON S.SALEID = sa.SALEID
+                                            INNER JOIN XININSURE.ACTION a ON sa.ACTIONID = a.ACTIONID
+                                            WHERE S.SALEID IN ({placeholders})
+                                                AND sa.ACTIONSTATUS = 'Y'
+                                                AND a.ACTIONCODE = 'ESY02'
+                                                AND S.PLATEID IS NOT NULL 
+                                                AND S.CANCELDATE IS NULL 
+                                                AND S.CANCELEFFECTIVEDATE IS NULL
+                                                AND (S.POLICYSTATUS = 'A' OR S.PRBSTATUS = 'A')
+                                                AND S.SALESTATUS = 'O'
+                                        )
+                                        SELECT SALEID 
+                                        FROM RankedActions 
+                                        WHERE rn = 1
+                """
+                params = {f'id{j}': int(v) for j, v in enumerate(batch)}
+                cursor.execute(check_esy02_query, params)
+                esy02_saleids.update(row[0] for row in cursor.fetchall())
 
             # 2. แบ่งกลุ่มใน Pandas
             df_result_is_esy = df[df['SALEID'].isin(esy02_saleids)].copy()
@@ -858,7 +1064,7 @@ with DAG(
             request_remark = "Auto Cancel MT สินเชื่อ ESY อนุมัติแล้วไม่สามารถยกเลิกได้ รบกวนตรวจสอบค่ะ"
             action_status = "X"
 
-            conn.commit()
+            # conn.commit()
 
             return {
                 'action_status': action_status,
