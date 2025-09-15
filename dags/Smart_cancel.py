@@ -1081,6 +1081,44 @@ with DAG(
             pass
         
     @task
+    def Split_has_remark(**kwargs):
+        ti = kwargs["ti"]
+        task_id = kwargs['task_instance'].task_id
+        try_number = kwargs['task_instance'].try_number
+        message = f"Processing task {task_id} ,try_number {try_number}"
+        print(f"{message}")
+        
+        # ดึงข้อมูลจาก task Split_segment_condition
+        result = ti.xcom_pull(task_ids="get_cancellation_group.Select_esy02_X", key="return_value")
+        df = result.get("df_filter_notesy_resultcode", pd.DataFrame())
+        
+        # อ่าน cancel_messages จาก config
+        cancel_messages = json.loads(cancel_messages_str)
+        
+        try:
+            if df.empty:
+                print("No data to process in Split_has_remark")
+                return {"matched_df": pd.DataFrame(), "unmatched_df": pd.DataFrame()}
+            
+            # สร้าง dictionary เพื่อเก็บผลลัพธ์
+            result_dfs = {}
+            unmatched_df = pd.DataFrame()
+            matched_df = pd.DataFrame()
+            
+            
+            # Return แยก matched และ unmatched DataFrame
+            return {
+                "matched_df": matched_df,
+                "unmatched_df": unmatched_df,
+                "result_by_code": result_dfs  # เก็บไว้สำหรับใช้งานแยกตามรหัส (ถ้าต้องการ)
+            }
+            
+        except Exception as e:
+            message = f"Fail with task {task_id} \n error : {e}"
+            print(f"Split_has_remark : {e}")
+            return {"matched_df": pd.DataFrame(), "unmatched_df": pd.DataFrame(), "result_by_code": {}}
+        
+    @task
     def Condition_B(**kwargs):
         ti = kwargs["ti"]
         task_id = kwargs['task_instance'].task_id
@@ -1289,64 +1327,84 @@ with DAG(
             print(f"Exception in result_cancel_after_3pm: {e}")
         return None
     
-    # @task
-    # def update_leadbypassrequest_status(**kwargs):
-    #     ti = kwargs["ti"]
-    #     task_id = kwargs['task_instance'].task_id
-    #     try_number = kwargs['task_instance'].try_number
-    #     message = f"Processing task {task_id} ,try_number {try_number}"
-    #     # print(f"{message}")
-    #     # send_flex_notification_start(message)
+    @task
+    def Split_update_v(**kwargs):
+        ti = kwargs["ti"]
+        task_id = kwargs['task_instance'].task_id
+        try_number = kwargs['task_instance'].try_number
+        message = f"Processing task {task_id} ,try_number {try_number}"
+        print(f"{message}")
         
-    #     result = ti.xcom_pull(task_ids="Process_x.Get_dnc_work", key="return_value")
+        result = ti.xcom_pull(task_ids="condition_group.Split_has_remark", key="return_value")
+        df = result["matched_df"]
+
+        try:
+            # ไม่มียอดชำระ ชำระครบ ไม่เป็นงาน esy และมี resultcode เป็น (XALL, XPOL, XPRB)
+            df_XPRB_V = df.query("ACTIONCODE == 'XPRB' and PRBSTATUS == 'C' and POLICYSTATUS == 'C'") if df is not None and not df.empty else pd.DataFrame()
+            
+            # resultcode เป็น XALL และ ไม่มียอดรับชำระ
+            df_XPOL_V = df.query("ACTIONCODE == 'XPOL' and PRBSTATUS == 'C' and POLICYSTATUS == 'C'") if df is not None and not df.empty else pd.DataFrame()
+            
+            # resultcode เป็น XALL และ ไม่มียอดรับชำระ
+            df_XALL_V = df.query("ACTIONCODE == 'XALL'") if df is not None and not df.empty else pd.DataFrame()
+            
+            df_update_V = pd.concat([df_XALL_V, df_XPOL_V, df_XPRB_V], ignore_index=True) if not (df_XALL_V.empty and df_XPOL_V.empty and df_XPRB_V.empty) else pd.DataFrame()
+
+            return {
+                "df_update_V": df_update_V,
+            }
         
-    #     # แสดงผลลัพธ์ที่ดึงมาจาก XCom
-    #     print("XCom result from Get_dnc_work:", result)
+        except Exception as e:
+            message = f"Fail with task {task_id} \n error : {e}"
+            print(f"Check_payment_date : {e}")
+            pass
+    
+    @task
+    def update_salestatus_V(**kwargs):
+        ti = kwargs["ti"]
+        task_id = kwargs['task_instance'].task_id
+        try_number = kwargs['task_instance'].try_number
+        message = f"Processing task {task_id} ,try_number {try_number}"
+        # print(f"{message}")
+        # send_flex_notification_start(message)
         
-    #     df = result["Get_dnc_work"]
+        result = ti.xcom_pull(task_ids="condition_group.Split_update_v", key="return_value")
         
-    #     cursor, conn = ConOracle()
+        df = result["df_update_V"]
         
-    #     try:
-    #         if df is None or df.empty:
-    #             print("DataFrame is empty. Exiting task.")
-    #             return {"Update_x_sum": df}
-    #         else:
-    #             update_status_query_X = """
-    #                     UPDATE TQMSALE.LEADBYPASSREQUEST Q
-    #                     SET Q.BYPASSSTATUS = 'X'
-    #                     WHERE Q.LEADID = :leadid
-    #                     AND Q.LEADASSIGNID = :leadassignid
-    #                     AND Q.BYPASSSTATUS = 'H'
-    #                 """
+        cursor, conn = ConOracle()
+        
+        try:
+            if df is None or df.empty:
+                print("DataFrame is empty. Exiting task.")
+                return {"Update_v_sum": df}
+            else:           
+                update_status_query_V = """
+                        UPDATE XININSURE.SALE a
+                        SET a.SALESTATUS = 'V'
+                        WHERE a.SALEID = :SALEID
+                        AND a.SALESTATUS = 'O'
+                        AND a.PRBSTATUS = 'C'
+                        AND a.POLICYSTATUS = 'C'
+                    """
                     
-    #             i = 0
-    #             for index, row in df.iterrows():
-    #                 cursor.execute(update_status_query_X, {'leadid': row['LEADID'], 'leadassignid': row['LEADASSIGNID']})
-    #                 print(f"Number: {i+1} Updated Bypassstatus to X row {index}: leadid={row['LEADID']}, leadassignid={row['LEADASSIGNID']}")
-    #                 i+=1
-                    
-    #             update_status_query_N = """
-    #                     UPDATE TQMSALE.LEADASSIGN a
-    #                     SET a.ASSIGNSTATUS = 'N'
-    #                     WHERE a.LEADID = :leadid
-    #                     AND a.LEADASSIGNID = :leadassignid
-    #                     AND a.ASSIGNSTATUS NOT IN ('N')
-    #                 """
-                    
-    #             i = 0
-    #             for index, row in df.iterrows():
-    #                 cursor.execute(update_status_query_N, {'leadid': row['LEADID'], 'leadassignid': row['LEADASSIGNID']})
-    #                 print(f"Number: {i+1} Updated Assignstatus to N row {index}: leadid={row['LEADID']}, leadassignid={row['LEADASSIGNID']}")
-    #                 i+=1
+                i = 0
+                for index, row in df.iterrows():
+                    cursor.execute(update_status_query_V, {'SALEID': row['SALEID']})
+                    print(f"Number: {i+1} Updated Salestatus to N row {index}: SALEID={row['SALEID']}")
+                    i+=1
                 
-    #             conn.commit() 
-    #             print("All updates committed successfully.")
-    #             formatted_table = df.to_markdown(index=False)
-    #             print(f"\n{formatted_table}")
-    #             message = f"จำนวนรายการที่ปรับสถานะรวม {df} รายการ"
-    #             print(message)
-    #             return {"Update_x_sum": df}
+                # conn.commit() 
+                print("All updates committed successfully.")
+                formatted_table = df.to_markdown(index=False)
+                print(f"\n{formatted_table}")
+                message = f"จำนวนรายการที่ปรับสถานะรวม {df} รายการ"
+                print(message)
+                return {"Update_v_sum": df}
+        except Exception as e:
+            message = f"Fail with task {task_id} \n error : {e}"
+            print(f"Check_payment_date : {e}")
+            pass
 
     #Dummy
     start = EmptyOperator(task_id="start_dag", trigger_rule="none_failed_min_one_success")
@@ -1389,11 +1447,13 @@ with DAG(
         condition_c_task = Condition_C()
         condition_b_task = Condition_B()
         Split_has_remark_task = Split_has_remark()
+        Split_update_v_task = Split_update_v()
+        update_salestatus_V_task = update_salestatus_V()
         check_time_result_task = Check_time_result_cancel()
         before_3pm_task = result_cancel_before_3pm()
         after_3pm_task = result_cancel_after_3pm()
         
-        condition_c_task >> condition_b_task >> Split_has_remark_task >> check_time_result_task >> [before_3pm_task, after_3pm_task]
+        condition_c_task >> condition_b_task >> Split_has_remark_task >> Split_update_v_task >> update_salestatus_V_task >> check_time_result_task >> [before_3pm_task, after_3pm_task]
         
     #กำหนด workflow
     (
