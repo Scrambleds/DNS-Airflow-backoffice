@@ -674,8 +674,7 @@ with DAG(
                                 S.PLATEID IS NOT NULL 
                                 AND S.CANCELDATE IS NULL 
                                 AND S.CANCELEFFECTIVEDATE IS NULL
-                                AND S.POLICYSTATUS = 'A'
-                                OR S.PRBSTATUS = 'A'
+                                AND (S.POLICYSTATUS = 'A' OR S.PRBSTATUS = 'A')
                                 AND S.SALESTATUS = 'O'
                             ORDER BY
                                 S.SALEID DESC
