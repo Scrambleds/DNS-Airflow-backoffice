@@ -720,6 +720,10 @@ with DAG(
 
         df = result.get("df_digital_room", pd.DataFrame())
         
+        formatted_table = df.to_markdown(index=False)
+            # print(query)
+        print(f"\n{formatted_table}")
+        
         cursor, conn = ConOracle()
         if cursor is None or conn is None:
             return None
