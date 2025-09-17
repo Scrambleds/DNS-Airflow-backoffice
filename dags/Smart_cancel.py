@@ -1298,8 +1298,8 @@ with DAG(
     @task
     def result_cancel_before_3pm(**kwargs):
         ti = kwargs["ti"]
-        result = ti.xcom_pull(task_ids="get_cancellation_group.Split_segment_condition", key="return_value")
-        df = result.get("result_cancel_before_3pm", pd.DataFrame()) # #FF0000 ต้องมาเปลี่ยนทีหลัง
+        result = ti.xcom_pull(task_ids="condition_group.Split_update_v", key="return_value")
+        df = result.get("df_update_V", pd.DataFrame()) # #FF0000 ต้องมาเปลี่ยนทีหลัง
 
         print("======= start result_cancel_before_3pm =======")
         
@@ -1316,8 +1316,8 @@ with DAG(
     @task
     def result_cancel_after_3pm(**kwargs):
         ti = kwargs["ti"]
-        result = ti.xcom_pull(task_ids="get_cancellation_group.Split_segment_condition", key="return_value")
-        df = result.get("result_cancel_before_3pm", pd.DataFrame()) # #FF0000 ต้องมาเปลี่ยนทีหลัง
+        result = ti.xcom_pull(task_ids="condition_group.Split_update_v", key="return_value")
+        df = result.get("df_update_V", pd.DataFrame()) # #FF0000 ต้องมาเปลี่ยนทีหลัง
 
         print("======= start result_cancel_after_3pm =======")
         try:
