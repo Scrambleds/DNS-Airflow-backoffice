@@ -1158,8 +1158,8 @@ with DAG(
         print(f"{message}")
         
         # ดึงข้อมูลจาก task Split_segment_condition
-        result = ti.xcom_pull(task_ids="get_cancellation_group.Select_esy02_X", key="return_value")
-        df = result.get("df_filter_notesy_resultcode", pd.DataFrame())
+        result = ti.xcom_pull(task_ids="get_cancellation_group.Split_segment_condition", key="return_value")
+        df = result.get("df_concat_resultcode_has_returndate", pd.DataFrame())
         
         # อ่าน cancel_messages จาก config
         cancel_messages = json.loads(cancel_messages_str)
