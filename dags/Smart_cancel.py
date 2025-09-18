@@ -1161,6 +1161,11 @@ with DAG(
         result = ti.xcom_pull(task_ids="get_cancellation_group.Split_segment_condition", key="return_value")
         df = result.get("df_concat_resultcode_has_returndate", pd.DataFrame())
         
+        formatted_table = df.to_markdown(index=False)
+        
+        # print(0)
+        print(f'\n{formatted_table}')
+        
         # อ่าน cancel_messages จาก config
         cancel_messages = json.loads(cancel_messages_str)
         
