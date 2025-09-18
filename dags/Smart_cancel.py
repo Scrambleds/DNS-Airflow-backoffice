@@ -1084,44 +1084,6 @@ with DAG(
             pass
         
     @task
-    def Split_has_remark(**kwargs):
-        ti = kwargs["ti"]
-        task_id = kwargs['task_instance'].task_id
-        try_number = kwargs['task_instance'].try_number
-        message = f"Processing task {task_id} ,try_number {try_number}"
-        print(f"{message}")
-        
-        # ดึงข้อมูลจาก task Split_segment_condition
-        result = ti.xcom_pull(task_ids="get_cancellation_group.Select_esy02_X", key="return_value")
-        df = result.get("df_filter_notesy_resultcode", pd.DataFrame())
-        
-        # อ่าน cancel_messages จาก config
-        cancel_messages = json.loads(cancel_messages_str)
-        
-        try:
-            if df.empty:
-                print("No data to process in Split_has_remark")
-                return {"matched_df": pd.DataFrame(), "unmatched_df": pd.DataFrame()}
-            
-            # สร้าง dictionary เพื่อเก็บผลลัพธ์
-            result_dfs = {}
-            unmatched_df = pd.DataFrame()
-            matched_df = pd.DataFrame()
-            
-            
-            # Return แยก matched และ unmatched DataFrame
-            return {
-                "matched_df": matched_df,
-                "unmatched_df": unmatched_df,
-                "result_by_code": result_dfs  # เก็บไว้สำหรับใช้งานแยกตามรหัส (ถ้าต้องการ)
-            }
-            
-        except Exception as e:
-            message = f"Fail with task {task_id} \n error : {e}"
-            print(f"Split_has_remark : {e}")
-            return {"matched_df": pd.DataFrame(), "unmatched_df": pd.DataFrame(), "result_by_code": {}}
-        
-    @task
     def Condition_B(**kwargs):
         ti = kwargs["ti"]
         task_id = kwargs['task_instance'].task_id
@@ -1342,13 +1304,10 @@ with DAG(
         df = result["matched_df"]
 
         try:
-            # ไม่มียอดชำระ ชำระครบ ไม่เป็นงาน esy และมี resultcode เป็น (XALL, XPOL, XPRB)
             df_XPRB_V = df.query("ACTIONCODE == 'XPRB' and PRBSTATUS == 'C' and POLICYSTATUS == 'C'") if df is not None and not df.empty else pd.DataFrame()
             
-            # resultcode เป็น XALL และ ไม่มียอดรับชำระ
             df_XPOL_V = df.query("ACTIONCODE == 'XPOL' and PRBSTATUS == 'C' and POLICYSTATUS == 'C'") if df is not None and not df.empty else pd.DataFrame()
             
-            # resultcode เป็น XALL และ ไม่มียอดรับชำระ
             df_XALL_V = df.query("ACTIONCODE == 'XALL'") if df is not None and not df.empty else pd.DataFrame()
             
             df_update_V = pd.concat([df_XALL_V, df_XPOL_V, df_XPRB_V], ignore_index=True) if not (df_XALL_V.empty and df_XPOL_V.empty and df_XPRB_V.empty) else pd.DataFrame()
