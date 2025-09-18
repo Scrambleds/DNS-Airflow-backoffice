@@ -1036,8 +1036,8 @@ with DAG(
         result = ti.xcom_pull(task_ids="get_cancellation_group.Check_balance", key="return_value")
         df_has_paid = result["df_has_paid"]
         
-        result = ti.xcom_pull(task_ids="get_cancellation_group.Select_esy02_X", key="return_value")
-        df_filter_notesy_noresultcode = result["df_filter_notesy_noresultcode"]
+        # result = ti.xcom_pull(task_ids="get_cancellation_group.Select_esy02_X", key="return_value")
+        # df_filter_notesy_noresultcode = result["df_filter_notesy_noresultcode"]
 
         try:
             # ไม่มียอดชำระ ชำระครบ ไม่เป็นงาน esy และมี resultcode เป็น (XALL, XPOL, XPRB)
