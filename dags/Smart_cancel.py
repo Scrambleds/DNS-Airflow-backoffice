@@ -116,7 +116,7 @@ def send_flex_notification_start(message=None):
         
         # สร้าง Flex Message
         flex_message = FlexSendMessage(
-            alt_text="สถานะการทำงาน DNC",
+            alt_text="สถานะการทำงาน Smart cancel MT",
             contents=contents
         )
 
@@ -599,8 +599,8 @@ with DAG(
                                                     15014 
                                                 ) 
                                                 AND SA.ACTIONSTATUS IN ( 'R', 'W', 'Y' ) 
-                                    AND SA.DUEDATE BETWEEN TO_DATE ( '03/09/2023', 'DD/MM/YYYY' ) 
-                                    AND TO_DATE ( '03/10/2023', 'DD/MM/YYYY' ) 
+                                    AND SA.DUEDATE BETWEEN TO_DATE ( '03/09/2024', 'DD/MM/YYYY' ) 
+                                    AND TO_DATE ( '03/10/2024', 'DD/MM/YYYY' ) 
                                 ),
                                 PAID AS (
                                 SELECT
@@ -610,11 +610,11 @@ with DAG(
                                     XININSURE.RECEIVEITEMCLEAR T
                                     JOIN XININSURE.RECEIVEITEM I ON T.RECEIVEID = I.RECEIVEID 
                                     AND T.RECEIVEITEM = I.RECEIVEITEM
-                                    JOIN XININSURE.RECEIVE R ON I.RECEIVEID = R.RECEIVEID 
+                                    JOIN XININSURE.RECEIVE R ON I.RECEIVEID = R.RECEIVEID
                                 WHERE
                                     R.RECEIVESTATUS IN ( 'S', 'C' ) 
-                                    AND I.RECEIVEDATE BETWEEN TO_DATE ( '03/09/2023', 'DD/MM/YYYY' ) 
-                                    AND TO_DATE ( '03/10/2023', 'DD/MM/YYYY' )
+                                    AND I.RECEIVEDATE BETWEEN TO_DATE ( '03/09/2024', 'DD/MM/YYYY' ) 
+                                    AND TO_DATE ( '03/10/2024', 'DD/MM/YYYY' )
                                 GROUP BY
                                     T.SALEID
                                 ),
@@ -707,6 +707,9 @@ with DAG(
         
         except oracledb.Error as e:
             print(f"Get_Data : {e}")
+            message = f'เกิดข้อผิดพลาดในการเรียกงาน Smart cancel MT : {e}'
+            # message = f"Fail with task {task_id} \n error : {error}"
+            send_flex_notification_start(message)
             
         finally:
             cursor.close()
@@ -769,6 +772,9 @@ with DAG(
 
         except oracledb.Error as error:
             print(f"OracleDB Error: {error}")
+            message = f'เกิดข้อผิดพลาด : {error}'
+            # message = f"Fail with task {task_id} \n error : {error}"
+            send_flex_notification_start(message)
             conn.rollback()
             return None
 
@@ -784,7 +790,7 @@ with DAG(
         df = result.get("df_cancel_work", pd.DataFrame())
 
         print("==== df_cancel_work ====")
-        print(df.head().to_markdown(index=False))
+        print(f"\n{df.head().to_markdown(index=False)}")
 
         if cursor is None or conn is None:
             return pd.DataFrame()
@@ -804,29 +810,16 @@ with DAG(
                 batch = saleids[i:i+batch_size]
                 placeholders = ','.join([f':id{j}' for j in range(len(batch))])
                 check_esy02_query = f"""       
-                    WITH RankedActions AS (
-                                            SELECT 
-                                                S.SALEID,
-                                                sa.SEQUENCE,
-                                                ROW_NUMBER() OVER (
-                                                    PARTITION BY S.SALEID 
-                                                    ORDER BY sa.SEQUENCE DESC
-                                                ) as rn
-                                            FROM XININSURE.SALE S
-                                            INNER JOIN XININSURE.SALEACTION sa ON S.SALEID = sa.SALEID
+                                        WITH LatestActions AS (
+                                            SELECT sa.SALEID, MAX(sa.SEQUENCE) as MAX_SEQ
+                                            FROM XININSURE.SALEACTION sa
                                             INNER JOIN XININSURE.ACTION a ON sa.ACTIONID = a.ACTIONID
-                                            WHERE S.SALEID IN ({placeholders})
-                                                AND sa.ACTIONSTATUS = 'Y'
-                                                AND a.ACTIONCODE = 'ESY02'
-                                                AND S.PLATEID IS NOT NULL 
-                                                AND S.CANCELDATE IS NULL 
-                                                AND S.CANCELEFFECTIVEDATE IS NULL
-                                                AND (S.POLICYSTATUS = 'A' OR S.PRBSTATUS = 'A')
-                                                AND S.SALESTATUS = 'O'
+                                            WHERE sa.SALEID in ({placeholders})
+                                            AND a.ACTIONCODE = 'ESY02'
+                                            GROUP BY sa.SALEID
                                         )
-                                        SELECT SALEID 
-                                        FROM RankedActions 
-                                        WHERE rn = 1
+                                        SELECT la.SALEID
+                                        FROM LatestActions la
                 """
                 params = {f'id{j}': int(v) for j, v in enumerate(batch)}
                 cursor.execute(check_esy02_query, params)
@@ -864,6 +857,8 @@ with DAG(
             print(f"Total is esy has_result_code = {df_filter_esy_resultcode}")
             print(f"Total not esy no_result_code = {df_filter_notesy_noresultcode}")
             print(f"Total not esy has_result_code = {df_filter_notesy_resultcode}")
+            
+            df_concat_resultcode_combine = pd.concat([df_filter_esy_noresultcode, df_filter_esy_resultcode], ignore_index=True) if not (df_filter_esy_noresultcode.empty and df_filter_esy_resultcode.empty) else pd.DataFrame()
 
             request_remark = "Auto Cancel MT สินเชื่อ ESY อนุมัติแล้วไม่สามารถยกเลิกได้ รบกวนตรวจสอบค่ะ"
             action_status = "X"
@@ -875,14 +870,17 @@ with DAG(
                 'request_remark': request_remark,
                 'df_filter_esy_noresultcode': df_filter_esy_noresultcode,
                 'df_filter_esy_resultcode': df_filter_esy_resultcode,
+                'df_concat_resultcode_combine': df_concat_resultcode_combine,
                 'df_filter_notesy_noresultcode': df_filter_notesy_noresultcode,
                 'df_filter_notesy_resultcode': df_filter_notesy_resultcode
             }
 
         except oracledb.Error as error:
             conn.rollback()
+            print(f"OracleDB Error: {error}")
             message = f'เกิดข้อผิดพลาด : {error}'
-            print(message)
+            # message = f"Fail with task {task_id} \n error : {error}"
+            send_flex_notification_start(message)
             return pd.DataFrame()
         finally:
             cursor.close()
@@ -892,7 +890,7 @@ with DAG(
     def process_esy_no_result_code(**kwargs):
         ti = kwargs["ti"]
         result = ti.xcom_pull(task_ids="get_cancellation_group.Select_esy02_X", key="return_value")
-        df = result.get("df_filter_esy_noresultcode", pd.DataFrame()) # easy no result code
+        df = result.get("df_concat_resultcode_combine", pd.DataFrame()) # easy no result code
 
         print("============ process_esy_no_result_code start ============")
 
@@ -980,8 +978,9 @@ with DAG(
             return {"df_has_paid":df_has_paid,"df_no_paid":df_no_paid}
         
         except Exception as e:
-            message = f"Fail with task {task_id} \n error : {e}"
-            print(f"Check_payment_date : {e}")
+            message = f'เกิดข้อผิดพลาด : {e}'
+            # message = f"Fail with task {task_id} \n error : {error}"
+            send_flex_notification_start(message)
             pass
         
     @task
@@ -1015,8 +1014,9 @@ with DAG(
             return {"df_paymentstatus_Y":df_paymentstatus_Y, "df_paymentstatus_not_Y":df_paymentstatus_not_Y}
         
         except Exception as e:
-            message = f"Fail with task {task_id} \n error : {e}"
-            print(f"Check_payment_date : {e}")
+            message = f'เกิดข้อผิดพลาด : {e}'
+            # message = f"Fail with task {task_id} \n error : {error}"
+            send_flex_notification_start(message)
             pass
         
     @task
@@ -1079,8 +1079,9 @@ with DAG(
             }
         
         except Exception as e:
-            message = f"Fail with task {task_id} \n error : {e}"
-            print(f"Check_payment_date : {e}")
+            message = f'เกิดข้อผิดพลาด : {e}'
+            # message = f"Fail with task {task_id} \n error : {error}"
+            send_flex_notification_start(message)
             pass
         
     @task
@@ -1107,8 +1108,9 @@ with DAG(
             return True
         
         except Exception as e:
-            message = f"Fail with task {task_id} \n error : {e}"
-            print(f"Check_payment_date : {e}")
+            message = f'เกิดข้อผิดพลาด : {e}'
+            # message = f"Fail with task {task_id} \n error : {error}"
+            send_flex_notification_start(message)
             pass
             
     @task
@@ -1145,8 +1147,9 @@ with DAG(
             return True
         
         except Exception as e:
-            message = f"Fail with task {task_id} \n error : {e}"
-            print(f"Check_payment_date : {e}")
+            message = f'เกิดข้อผิดพลาด : {e}'
+            # message = f"Fail with task {task_id} \n error : {error}"
+            send_flex_notification_start(message)
             pass
         
     @task
@@ -1278,6 +1281,9 @@ with DAG(
             Set_sale_action_status(df)
         except Exception as e:
             print(f"Exception in result_cancel_before_3pm: {e}")
+            message = f'เกิดข้อผิดพลาด : {e}'
+            # message = f"Fail with task {task_id} \n error : {error}"
+            send_flex_notification_start(message)
         return None
     
     @task
@@ -1295,6 +1301,9 @@ with DAG(
             Set_sale_action_status(df)
         except Exception as e:
             print(f"Exception in result_cancel_after_3pm: {e}")
+            message = f'เกิดข้อผิดพลาด : {e}'
+            # message = f"Fail with task {task_id} \n error : {error}"
+            send_flex_notification_start(message)
         return None
     
     @task
@@ -1322,8 +1331,9 @@ with DAG(
             }
         
         except Exception as e:
-            message = f"Fail with task {task_id} \n error : {e}"
-            print(f"Check_payment_date : {e}")
+            message = f'เกิดข้อผิดพลาด : {e}'
+            # message = f"Fail with task {task_id} \n error : {error}"
+            send_flex_notification_start(message)
             pass
     
     @task
@@ -1369,8 +1379,9 @@ with DAG(
                 print(message)
                 return {"Update_v_sum": df}
         except Exception as e:
-            message = f"Fail with task {task_id} \n error : {e}"
-            print(f"Check_payment_date : {e}")
+            message = f'เกิดข้อผิดพลาด : {e}'
+            # message = f"Fail with task {task_id} \n error : {error}"
+            send_flex_notification_start(message)
             pass
 
     #Dummy
