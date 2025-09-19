@@ -1318,9 +1318,9 @@ with DAG(
         df = result["matched_df"]
 
         try:
-            df_XPRB_V = df.query("ACTIONCODE == 'XPRB' and PRBSTATUS == 'C' and POLICYSTATUS == 'C'") if df is not None and not df.empty else pd.DataFrame()
+            df_XPRB_V = df.query("ACTIONCODE == 'XPRB'") if df is not None and not df.empty else pd.DataFrame()
             
-            df_XPOL_V = df.query("ACTIONCODE == 'XPOL' and PRBSTATUS == 'C' and POLICYSTATUS == 'C'") if df is not None and not df.empty else pd.DataFrame()
+            df_XPOL_V = df.query("ACTIONCODE == 'XPOL'") if df is not None and not df.empty else pd.DataFrame()
             
             df_XALL_V = df.query("ACTIONCODE == 'XALL'") if df is not None and not df.empty else pd.DataFrame()
             
