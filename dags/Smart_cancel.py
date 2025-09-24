@@ -354,7 +354,7 @@ def Set_result_cancel(df = pd.DataFrame(), isBefore3PM = False):
 
     sql = """
             UPDATE
-                XININSURE.SALE
+                XININSURE.SALE X
             SET
                 {0}
             WHERE
@@ -373,33 +373,49 @@ def Set_result_cancel(df = pd.DataFrame(), isBefore3PM = False):
                 remark = row["ACTIONREMARK"]
             if row["ACTIONREMARK"] is None and row["REQUESTREMARK"] is not None:
                 remark = row["REQUESTREMARK"]
-            if row['RESULTCODE'].iloc[0] in ['XPOL']:
+            if row['RESULTCODE'] in ['XPOL']:
                 field_cond = """
                     CANCELDATE = :cancel_date,
-                    CACELRESULTID = :resultid,
+                    CANCELRESULTID = :resultid,
                     OTHERCANCEL = :remark,
                     CANCELREQUESTBY = :cancel_by
                 """
-            elif row['RESULTCODE'].iloc[0] in ['XPRB']:
+            elif row['RESULTCODE'] in ['XPRB']:
                 field_cond = """
                     CANCELDATE = :cancel_date,
                     PRBCANCELRESULTID = :resultid,
                     OTHERCANCELPRB = :remark,
                     CANCELREQUESTBY = :cancel_by
                 """
-            elif row['RESULTCODE'].iloc[0] in ['XALL']:
+            elif row['RESULTCODE'] in ['XALL']:
                 field_cond = """
                     CANCELDATE = :cancel_date,
-                    CACELRESULTID = :resultid,
+                    CANCELRESULTID = :resultid,
                     OTHERCANCEL = :remark,
                     PRBCANCELDATE = :cancel_date,
                     PRBCANCELRESULTID = :resultid,
                     OTHERCANCELPRB = :remark,
                     CANCELREQUESTBY = :cancel_by
                 """
+            # var_cond = {
+            #     "cancel_date" : "TRUNC(SYSDATE)" if isBefore3PM else "TRUNC(SYSDATE) + INTERVAL '1' DAY",
+            #     "resultid": row["RESULTID"],
+            #     "remark" : remark,
+            #     "cancel_by" : cancel_by
+            # }
+            # cursor.execute(sql.format(field_cond), {
+            #     "saleid": row["SALEID"],
+            #     **var_cond
+            # })
+            
+            if isBefore3PM:
+                cancel_date_sql = "TRUNC(SYSDATE)"
+            else:
+                cancel_date_sql = "TRUNC(SYSDATE) + INTERVAL '1' DAY"
+
+            field_cond = field_cond.replace(":cancel_date", cancel_date_sql)
             var_cond = {
-                "cancel_date" : "TRUNC(SYSDATE)" if isBefore3PM else "TRUNC(SYSDATE) + INTERVAL '1' DAY",
-                "resultid" : row["RESULTID"].iloc[0],
+                "resultid": row["RESULTID"],
                 "remark" : remark,
                 "cancel_by" : cancel_by
             }
@@ -714,8 +730,8 @@ with DAG(
                             S.PLATEID IS NOT NULL
                             AND S.CANCELDATE IS NULL
                             AND S.CANCELEFFECTIVEDATE IS NULL
-                            AND (S.POLICYSTATUS = 'A'
-                                OR S.PRBSTATUS = 'A')
+                            AND (S.POLICYSTATUS NOT IN 'A'
+                             OR S.PRBSTATUS NOT IN 'A')
                             AND S.SALESTATUS = 'O'
                         ORDER BY
                             S.SALEID DESC
@@ -841,7 +857,6 @@ with DAG(
                 print("DataFrame is empty.")
                 return pd.DataFrame()
             
-            # แปลง SALEID ใน df เป็น str ทั้งหมด เพื่อป้องกันชนิดข้อมูลไม่ตรงกัน
             df['SALEID'] = df['SALEID'].astype(str)
             saleids = [str(x) for x in df['SALEID'].unique()]
             if not saleids:
@@ -1140,8 +1155,8 @@ with DAG(
             # เตรียมนำไปกรองข้อมูลเฉพาะ return date
             df_concat_resultcode = pd.concat([df_XALL_Y, df_XPOL_Y, df_XPRB_no_policynumber], ignore_index=True) if not (df_XALL_Y.empty and df_XPOL_Y.empty and df_XPRB_no_policynumber.empty) else pd.DataFrame()
             
-            df_full_paid_XALL = df_paymentstatus_not_Y.query("RESULTCODE == 'XALL'") if df_paymentstatus_not_Y is not None and not df_paymentstatus_not_Y.empty else pd.DataFrame()
-            df_full_paid_XPOL = df_paymentstatus_not_Y.query("RESULTCODE == 'XPOL'") if df_paymentstatus_not_Y is not None and not df_paymentstatus_not_Y.empty else pd.DataFrame()
+            df_full_paid_XALL = df_paymentstatus_Y.query("RESULTCODE == 'XALL'") if df_paymentstatus_Y is not None and not df_paymentstatus_Y.empty else pd.DataFrame()
+            df_full_paid_XPOL = df_paymentstatus_Y.query("RESULTCODE == 'XPOL'") if df_paymentstatus_Y is not None and not df_paymentstatus_Y.empty else pd.DataFrame()
             df_full_paid_XPRB = df_XPRB_has_policynumber if df_XPRB_has_policynumber is not None and not df_XPRB_has_policynumber.empty else pd.DataFrame()
             df_concat_full_paid = pd.concat([df_full_paid_XALL, df_full_paid_XPOL, df_full_paid_XPRB], ignore_index=True) if not (df_full_paid_XALL.empty and df_full_paid_XPOL.empty and df_full_paid_XPRB.empty) else pd.DataFrame()
             
@@ -1493,13 +1508,13 @@ with DAG(
                     resultcode = row["RESULTCODE"]
                     # เลือก field เฉพาะตาม RESULTCODE
                     if resultcode == 'XALL':
-                        set_fields = "a.SALESTATUS = 'V', a.PRBCANCELDATE = SYSDATE"
+                        set_fields = "a.SALESTATUS = 'V'"
                         extra_cond = "AND a.PRBSTATUS = 'C' AND a.POLICYSTATUS = 'C'"
                     elif resultcode == 'XPOL':
-                        set_fields = "a.SALESTATUS = 'V', a.PRBCANCELDATE = SYSDATE"
+                        set_fields = "a.SALESTATUS = 'V'"
                         extra_cond = "AND a.POLICYSTATUS = 'C' AND (a.PRBSTATUS NOT IN ('A') OR a.PRBSTATUS IS NULL)"
                     elif resultcode == 'XPRB':
-                        set_fields = "a.SALESTATUS = 'V', a.PRBCANCELDATE = SYSDATE"
+                        set_fields = "a.SALESTATUS = 'V'"
                         extra_cond = "AND a.PRBSTATUS = 'C' AND (a.POLICYSTATUS NOT IN ('A') OR a.POLICYSTATUS IS NULL)"
                     else:
                         print(f"Unknown RESULTCODE: {resultcode} for SALEID={row['SALEID']}, skipping update.")
@@ -1531,8 +1546,8 @@ with DAG(
                 print(message)
                 return {"Update_v_sum": df}
         except Exception as e:
-            message = f'เกิดข้อผิดพลาด : {e}'
-            send_flex_notification_start(message)
+            print(f"Get_Data : {e}")
+            message = f'เกิดข้อผิดพลาดในการอัพเดต Smart cancel MT : {e}'
             pass
         finally:
             cursor.close()
@@ -1657,7 +1672,7 @@ with DAG(
                                 S.PLATEID IS NOT NULL 
                                 AND S.CANCELDATE IS NULL 
                                 AND S.CANCELEFFECTIVEDATE IS NULL
-                                AND (S.POLICYSTATUS = 'A' OR S.PRBSTATUS = 'A')
+                                --AND (S.POLICYSTATUS = 'A' OR S.PRBSTATUS = 'A')
                                 AND S.SALESTATUS IN ('O','V')
                             ORDER BY
                                 S.SALEID DESC
