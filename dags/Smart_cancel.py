@@ -264,6 +264,8 @@ def Check_action_code(row, df_actionData):
                 code = 'ZBR03'
             elif region in ['S']:
                 code = 'ZBR04'
+        elif actionCode in ['CMT07.2', 'CMT01', 'CMT02']:
+            code = actionCode
         elif actionCode in invalid_action_codes:
             code = 'CMT105.1'
         
@@ -412,7 +414,7 @@ def Set_result_cancel(df = pd.DataFrame(), isBefore3PM = False):
         print(f"Get data successfully")
         print(f"df: {len(df)}")
 
-        #conn.commit()  
+        #conn.commit() 
         return { 'Set_action_code': df }
     
     except Exception as e:
@@ -449,7 +451,7 @@ def Set_sale_action_status(df = pd.DataFrame()):
                 "seq": row["SEQUENCE"]
             })
 
-        #conn.commit()  
+        #conn.commit() 
         return { 'Set_action_code': df }
     
     except Exception as e:
@@ -502,7 +504,7 @@ def Set_action_code(action_status = "X", request_remark = "Auto Cancel MT สิ
         print(f"Get data successfully")
         print(f"df: {len(df)}")
 
-        #conn.commit()  
+        #conn.commit() 
         return { 'Set_action_code': df }
     
     except oracledb.Error as e:
@@ -560,7 +562,7 @@ with DAG(
         cursor, conn = ConOracle()
         try:
             query = f"""
-                        WITH SSA AS (
+                                    WITH SSA AS (
                                             SELECT
                                                 SA.SALEID,
                                                 SA.INSTALLMENT,
@@ -599,8 +601,8 @@ with DAG(
                                                     15014 
                                                 ) 
                                                 AND SA.ACTIONSTATUS IN ( 'R', 'W', 'Y' ) 
-                                    AND SA.DUEDATE BETWEEN TO_DATE ( '03/09/2024', 'DD/MM/YYYY' ) 
-                                    AND TO_DATE ( '03/10/2024', 'DD/MM/YYYY' ) 
+                                    AND SA.DUEDATE BETWEEN TO_DATE ( '23/09/2025', 'DD/MM/YYYY' ) 
+                                    AND TO_DATE ( '23/09/2025', 'DD/MM/YYYY' ) 
                                 ),
                                 PAID AS (
                                 SELECT
@@ -613,8 +615,8 @@ with DAG(
                                     JOIN XININSURE.RECEIVE R ON I.RECEIVEID = R.RECEIVEID
                                 WHERE
                                     R.RECEIVESTATUS IN ( 'S', 'C' ) 
-                                    AND I.RECEIVEDATE BETWEEN TO_DATE ( '03/09/2024', 'DD/MM/YYYY' ) 
-                                    AND TO_DATE ( '03/10/2024', 'DD/MM/YYYY' )
+                                    AND I.RECEIVEDATE BETWEEN TO_DATE ( '23/09/2025', 'DD/MM/YYYY' ) 
+                                    AND TO_DATE ( '23/09/2025', 'DD/MM/YYYY' )
                                 GROUP BY
                                     T.SALEID
                                 ),
@@ -653,7 +655,8 @@ with DAG(
                                 PT.PRODUCTTYPE, 
                                 S.PRBSTATUS,
                                 S.POLICYSTATUS,
-                                S.SALESTATUS
+                                S.SALESTATUS,
+                                S.PRBPOLICYNUMBER
                             FROM
                                 XININSURE.sale S
                                 JOIN SSA ON S.SALEID = SSA.SALEID
@@ -767,7 +770,7 @@ with DAG(
                         print(f"Insert {i+1}: SALEID={row['SALEID']}, ACTIONID={action_code_insert}")
                         i += 1
 
-                #conn.commit()  
+                #conn.commit() 
                 return df
 
         except oracledb.Error as error:
@@ -808,22 +811,34 @@ with DAG(
             esy02_saleids = set()
             for i in range(0, len(saleids), batch_size):
                 batch = saleids[i:i+batch_size]
-                placeholders = ','.join([f':id{j}' for j in range(len(batch))])
-                check_esy02_query = f"""       
-                                        WITH LatestActions AS (
-                                            SELECT sa.SALEID, MAX(sa.SEQUENCE) as MAX_SEQ
-                                            FROM XININSURE.SALEACTION sa
-                                            INNER JOIN XININSURE.ACTION a ON sa.ACTIONID = a.ACTIONID
-                                            WHERE sa.SALEID in ({placeholders})
-                                            AND a.ACTIONCODE = 'ESY02'
-                                            GROUP BY sa.SALEID
-                                        )
-                                        SELECT la.SALEID
-                                        FROM LatestActions la
-                """
-                params = {f'id{j}': int(v) for j, v in enumerate(batch)}
-                cursor.execute(check_esy02_query, params)
-                esy02_saleids.update(row[0] for row in cursor.fetchall())
+                for saleid in batch:
+                    check_esy02_query = f"""       
+                                            WITH MASTERSALE AS (
+                                            SELECT s.SALEID
+                                            FROM XININSURE.sale s          
+                                            WHERE (s.SALEID = :ID OR s.MASTERSALEID = :ID)
+                                            )
+                                            SELECT s.SALEID, s.MASTERSALEID, s.SALEBOOKCODE
+                                            FROM XININSURE.sale s
+                                            JOIN MASTERSALE ms ON ms.SALEID = s.SALEID
+                                            WHERE (s.SALEID = ms.SALEID OR s.MASTERSALEID = ms.SALEID)
+                                            AND s.SALEBOOKCODE = 'ESY'
+                                            AND EXISTS (
+                                            SELECT
+                                                1
+                                            FROM
+                                                XININSURE.SALEACTION SA
+                                            WHERE SA.SALEID = :ID
+                                                AND SA.ACTIONID = 9434
+                                                -- ESY02 อนุมัติสินเชื่อ Easy Lending
+                                                AND SA.ACTIONSTATUS = 'Y' 
+                                            )
+                    """
+                
+                cursor.execute(check_esy02_query, {"ID": int(saleid)})
+                result_rows = cursor.fetchall()
+                if result_rows:
+                    esy02_saleids.add(saleid)
 
             # 2. แบ่งกลุ่มใน Pandas
             df_result_is_esy = df[df['SALEID'].isin(esy02_saleids)].copy()
@@ -842,10 +857,12 @@ with DAG(
 
             if not df_result_not_esy.empty and "RESULTCODE" in df_result_not_esy.columns:
                 df_filter_notesy_noresultcode = df_result_not_esy.query("RESULTCODE not in ('XPOL', 'XALL', 'XPRB')")
+                df_filter_mismatch_actioncodes = df_result_not_esy.query("ACTIONCODE not in @invalid_action_codes")
                 df_filter_notesy_resultcode = df_result_not_esy.query("RESULTCODE in ('XPOL', 'XALL', 'XPRB')")
             else:
                 df_filter_notesy_noresultcode = pd.DataFrame()
                 df_filter_notesy_resultcode = pd.DataFrame()
+                df_filter_mismatch_actioncodes = pd.DataFrame()
 
             formatted_table = df.to_markdown(index=False)
             print(f"\n{formatted_table}")
@@ -857,13 +874,16 @@ with DAG(
             print(f"Total is esy has_result_code = {df_filter_esy_resultcode}")
             print(f"Total not esy no_result_code = {df_filter_notesy_noresultcode}")
             print(f"Total not esy has_result_code = {df_filter_notesy_resultcode}")
+            print(f"Total not esy mismatch_actioncodes = {df_filter_mismatch_actioncodes}")
             
             df_concat_resultcode_combine = pd.concat([df_filter_esy_noresultcode, df_filter_esy_resultcode], ignore_index=True) if not (df_filter_esy_noresultcode.empty and df_filter_esy_resultcode.empty) else pd.DataFrame()
+            
+            df_concat_not_esy_resultcode_combine = pd.concat([df_filter_notesy_resultcode, df_filter_mismatch_actioncodes], ignore_index=True) if not (df_filter_notesy_resultcode.empty and df_filter_mismatch_actioncodes.empty) else pd.DataFrame()
 
             request_remark = "Auto Cancel MT สินเชื่อ ESY อนุมัติแล้วไม่สามารถยกเลิกได้ รบกวนตรวจสอบค่ะ"
             action_status = "X"
 
-            # conn.commit()
+            #conn.commit()
 
             return {
                 'action_status': action_status,
@@ -872,7 +892,9 @@ with DAG(
                 'df_filter_esy_resultcode': df_filter_esy_resultcode,
                 'df_concat_resultcode_combine': df_concat_resultcode_combine,
                 'df_filter_notesy_noresultcode': df_filter_notesy_noresultcode,
-                'df_filter_notesy_resultcode': df_filter_notesy_resultcode
+                'df_filter_notesy_resultcode': df_filter_notesy_resultcode,
+                'df_filter_mismatch_actioncodes': df_filter_mismatch_actioncodes,
+                'df_concat_not_esy_resultcode_combine': df_concat_not_esy_resultcode_combine
             }
 
         except oracledb.Error as error:
@@ -961,7 +983,7 @@ with DAG(
         print(f"{message}")
         
         result = ti.xcom_pull(task_ids="get_cancellation_group.Select_esy02_X", key="return_value")
-        df = result.get("df_filter_esy_resultcode", pd.DataFrame())
+        df = result.get("df_concat_not_esy_resultcode_combine", pd.DataFrame())
         # df_esy_noresult = result.get("df_filter_esy_noresultcode", pd.DataFrame())
         
         empty_df_result = pd.DataFrame(columns=df.columns) if df is not None and not df.empty else pd.DataFrame()
@@ -1001,7 +1023,7 @@ with DAG(
         empty_df_no_paid = pd.DataFrame(columns=df_no_paid.columns) if df_no_paid is not None and not df_no_paid.empty else pd.DataFrame()
         try:
             
-            df_paymentstatus_Y = df_has_paid.query("PAYMENTSTATUS == 'Y'") if df_has_paid is not None and not df_has_paid.empty else empty_df_has_paid
+            df_paymentstatus_Y = df_no_paid.query("PAYMENTSTATUS == 'Y'") if df_no_paid is not None and not df_no_paid.empty else empty_df_no_paid
             df_paymentstatus_not_Y = df_no_paid.query("PAYMENTSTATUS not in 'Y'") if df_no_paid is not None and not df_no_paid.empty else empty_df_no_paid
             
             formatted_table_df_paymentstatus_Y = df_paymentstatus_Y.to_markdown(index=False)
@@ -1030,27 +1052,34 @@ with DAG(
         result = ti.xcom_pull(task_ids="get_cancellation_group.Check_package_balance", key="return_value")
         df_paymentstatus_Y = result["df_paymentstatus_Y"]
         
+        result = ti.xcom_pull(task_ids="get_cancellation_group.Check_package_balance", key="return_value")
+        df_paymentstatus_not_Y = result["df_paymentstatus_not_Y"]
+        
         result = ti.xcom_pull(task_ids="get_cancellation_group.Check_balance", key="return_value")
         df_no_paid = result["df_no_paid"]
         
         result = ti.xcom_pull(task_ids="get_cancellation_group.Check_balance", key="return_value")
         df_has_paid = result["df_has_paid"]
         
+        print("df_paymentstatus_Y columns:", df_paymentstatus_Y.columns)
+        print("df_no_paid columns:", df_no_paid.columns)
+        print("df_has_paid columns:", df_has_paid.columns)
+        
         # result = ti.xcom_pull(task_ids="get_cancellation_group.Select_esy02_X", key="return_value")
         # df_filter_notesy_noresultcode = result["df_filter_notesy_noresultcode"]
 
         try:
             # ไม่มียอดชำระ ชำระครบ ไม่เป็นงาน esy และมี resultcode เป็น (XALL, XPOL, XPRB)
-            df_XALL_Y = df_paymentstatus_Y.query("ACTIONCODE == 'XALL'") if df_paymentstatus_Y is not None and not df_paymentstatus_Y.empty else pd.DataFrame()
-            df_XPOL_Y = df_paymentstatus_Y.query("ACTIONCODE == 'XPOL'") if df_paymentstatus_Y is not None and not df_paymentstatus_Y.empty else pd.DataFrame()
+            df_XALL_Y = df_paymentstatus_Y.query("RESULTCODE == 'XALL'") if df_paymentstatus_Y is not None and not df_paymentstatus_Y.empty else pd.DataFrame()
+            df_XPOL_Y = df_paymentstatus_Y.query("RESULTCODE == 'XPOL'") if df_paymentstatus_Y is not None and not df_paymentstatus_Y.empty else pd.DataFrame()
             
             # resultcode เป็น XPRB และ ไม่มียอดรับชำระ
-            df_XPRB_W = df_no_paid.query("ACTIONCODE == 'XPRB'") if df_no_paid is not None and not df_no_paid.empty else pd.DataFrame()
+            df_XPRB_W = df_no_paid.query("RESULTCODE == 'XPRB'") if df_no_paid is not None and not df_no_paid.empty else pd.DataFrame()
             
             # มียอดชำระและมี resultcode เป็น (XALL, XPOL, XPRB)
-            df_has_paid_XALL = df_has_paid.query("ACTIONCODE == 'XALL'") if df_has_paid is not None and not df_has_paid.empty else pd.DataFrame()
-            df_has_paid_XPOL = df_has_paid.query("ACTIONCODE == 'XPOL'") if df_has_paid is not None and not df_has_paid.empty else pd.DataFrame()
-            df_has_paid_XPRB = df_has_paid.query("ACTIONCODE == 'XPRB'") if df_has_paid is not None and not df_has_paid.empty else pd.DataFrame()
+            df_has_paid_XALL = df_has_paid.query("RESULTCODE == 'XALL'") if df_has_paid is not None and not df_has_paid.empty else pd.DataFrame()
+            df_has_paid_XPOL = df_has_paid.query("RESULTCODE == 'XPOL'") if df_has_paid is not None and not df_has_paid.empty else pd.DataFrame()
+            df_has_paid_XPRB = df_has_paid.query("RESULTCODE == 'XPRB'") if df_has_paid is not None and not df_has_paid.empty else pd.DataFrame()
             df_concat_resultcode_has_paid = pd.concat([df_has_paid_XALL, df_has_paid_XPOL, df_has_paid_XPRB], ignore_index=True) if not (df_has_paid_XALL.empty and df_has_paid_XPOL.empty and df_has_paid_XPRB.empty) else pd.DataFrame()
                         
             # resultcode เป็น XPRB และมีหมายเลขกรมธรรม์
@@ -1062,25 +1091,59 @@ with DAG(
             # เตรียมนำไปกรองข้อมูลเฉพาะ return date
             df_concat_resultcode = pd.concat([df_XALL_Y, df_XPOL_Y, df_XPRB_no_policynumber], ignore_index=True) if not (df_XALL_Y.empty and df_XPOL_Y.empty and df_XPRB_no_policynumber.empty) else pd.DataFrame()
             
-            mask = df_concat_resultcode["RETURNDATE"].notnull() if not df_concat_resultcode.empty else pd.Series(dtype=bool)
+            df_full_paid_XALL = df_paymentstatus_not_Y.query("RESULTCODE == 'XALL'") if df_paymentstatus_not_Y is not None and not df_paymentstatus_not_Y.empty else pd.DataFrame()
+            df_full_paid_XPOL = df_paymentstatus_not_Y.query("RESULTCODE == 'XPOL'") if df_paymentstatus_not_Y is not None and not df_paymentstatus_not_Y.empty else pd.DataFrame()
+            df_full_paid_XPRB = df_XPRB_has_policynumber if df_XPRB_has_policynumber is not None and not df_XPRB_has_policynumber.empty else pd.DataFrame()
+            df_concat_full_paid = pd.concat([df_full_paid_XALL, df_full_paid_XPOL, df_full_paid_XPRB], ignore_index=True) if not (df_full_paid_XALL.empty and df_full_paid_XPOL.empty and df_full_paid_XPRB.empty) else pd.DataFrame()
+            
+            df_XALL_valid = df_concat_full_paid[(df_concat_full_paid['RESULTCODE'] == 'XALL') & df_concat_full_paid['RETURNDATE_S'].notnull() & df_concat_full_paid['RETURNDATE_P'].notnull()]
+            df_XPOL_valid = df_concat_full_paid[(df_concat_full_paid['RESULTCODE'] == 'XPOL') & df_concat_full_paid['RETURNDATE_S'].notnull()]
+            df_XPRB_valid = df_concat_full_paid[(df_concat_full_paid['RESULTCODE'] == 'XPRB') & df_concat_full_paid['RETURNDATE_P'].notnull()]
+            
+            df_concat_resultcode_has_returndate = pd.concat([df_XALL_valid, df_XPOL_valid, df_XPRB_valid], ignore_index=True) if not (df_XALL_valid.empty and df_XPOL_valid.empty and df_XPRB_valid.empty) else pd.DataFrame()
+            
+            # mask = df_concat_has_returndate["RETURNDATE"].notnull() if not df_concat_has_returndate.empty else pd.Series(dtype=bool)
 
-            # กรองข้อมูลที่มีค่า return date
-            df_concat_resultcode_has_returndate = df_concat_resultcode[mask] if not df_concat_resultcode.empty else pd.DataFrame()
+            # # กรองข้อมูลที่มีค่า return date
+            # df_concat_resultcode_has_returndate = df_concat_has_returndate[mask] if not df_concat_has_returndate.empty else pd.DataFrame()
+            
+            # เงื่อนไข "ไม่ valid" สำหรับแต่ละ RESULTCODE
+
+            df_XALL_invalid = df_concat_full_paid[
+                (df_concat_full_paid['RESULTCODE'] == 'XALL') &
+                (
+                    df_concat_full_paid['RETURNDATE_S'].isnull() |
+                    df_concat_full_paid['RETURNDATE_P'].isnull()
+                )
+            ]
+
+            df_XPOL_invalid = df_concat_full_paid[
+                (df_concat_full_paid['RESULTCODE'] == 'XPOL') &
+                (df_concat_full_paid['RETURNDATE_S'].isnull())
+            ]
+
+            df_XPRB_invalid = df_concat_full_paid[
+                (df_concat_full_paid['RESULTCODE'] == 'XPRB') &
+                (df_concat_full_paid['RETURNDATE_P'].isnull())
+            ]
+            
+            df_concat_resultcode_no_returndate = pd.concat([df_XALL_invalid, df_XPOL_invalid, df_XPRB_invalid], ignore_index=True) if not (df_XALL_invalid.empty and df_XPOL_invalid.empty and df_XPRB_invalid.empty) else pd.DataFrame()
             
             # กรองข้อมูลที่ไม่มีค่า return date
-            df_concat_resultcode_no_returndate = df_concat_resultcode[~mask] if not df_concat_resultcode.empty else pd.DataFrame()
+            # df_concat_resultcode_no_returndate = df_concat_has_returndate[~mask] if not df_concat_has_returndate.empty else pd.DataFrame()
 
             return {
                 "df_concat_resultcode_has_returndate": df_concat_resultcode_has_returndate,
                 "df_concat_resultcode_no_returndate": df_concat_resultcode_no_returndate,
                 "df_XPRB_has_policynumber": df_XPRB_has_policynumber,
                 "df_XPRB_no_policynumber": df_XPRB_no_policynumber,
-                "df_concat_resultcode_has_paid": df_concat_resultcode_has_paid
+                "df_concat_resultcode_has_paid": df_concat_resultcode_has_paid,
+                "df_concat_full_paid": df_concat_full_paid
             }
         
         except Exception as e:
             message = f'เกิดข้อผิดพลาด : {e}'
-            # message = f"Fail with task {task_id} \n error : {error}"
+            print(f"[Split_segment_condition] Exception: {e}")
             send_flex_notification_start(message)
             pass
         
@@ -1276,15 +1339,17 @@ with DAG(
         try:
             if df.empty:
                 print("No ESY records to process for cancellation before 3 PM.")
-                return None
+                return "condition_group.Check_salestatus"
             Set_result_cancel(df, isBefore3PM=True)
             Set_sale_action_status(df)
+            
+            return "condition_group.Check_salestatus"
         except Exception as e:
             print(f"Exception in result_cancel_before_3pm: {e}")
             message = f'เกิดข้อผิดพลาด : {e}'
             # message = f"Fail with task {task_id} \n error : {error}"
             send_flex_notification_start(message)
-        return None
+        return "condition_group.Check_salestatus"
     
     @task
     def result_cancel_after_3pm(**kwargs):
@@ -1296,15 +1361,17 @@ with DAG(
         try:
             if df.empty:
                 print("No ESY records to process for cancellation after 3 PM.")
-                return None
+                return "condition_group.Check_salestatus"
             Set_result_cancel(df, isBefore3PM=False)
             Set_sale_action_status(df)
+            
+            return "condition_group.Check_salestatus"
         except Exception as e:
             print(f"Exception in result_cancel_after_3pm: {e}")
             message = f'เกิดข้อผิดพลาด : {e}'
             # message = f"Fail with task {task_id} \n error : {error}"
             send_flex_notification_start(message)
-        return None
+        return "condition_group.Check_salestatus"
     
     @task
     def Split_update_v(**kwargs):
@@ -1318,11 +1385,11 @@ with DAG(
         df = result["matched_df"]
 
         try:
-            df_XPRB_V = df.query("ACTIONCODE == 'XPRB'") if df is not None and not df.empty else pd.DataFrame()
+            df_XPRB_V = df.query("RESULTCODE == 'XPRB'") if df is not None and not df.empty else pd.DataFrame()
             
-            df_XPOL_V = df.query("ACTIONCODE == 'XPOL'") if df is not None and not df.empty else pd.DataFrame()
+            df_XPOL_V = df.query("RESULTCODE == 'XPOL'") if df is not None and not df.empty else pd.DataFrame()
             
-            df_XALL_V = df.query("ACTIONCODE == 'XALL'") if df is not None and not df.empty else pd.DataFrame()
+            df_XALL_V = df.query("RESULTCODE == 'XALL'") if df is not None and not df.empty else pd.DataFrame()
             
             df_update_V = pd.concat([df_XALL_V, df_XPOL_V, df_XPRB_V], ignore_index=True) if not (df_XALL_V.empty and df_XPOL_V.empty and df_XPRB_V.empty) else pd.DataFrame()
 
@@ -1346,7 +1413,6 @@ with DAG(
         # send_flex_notification_start(message)
         
         result = ti.xcom_pull(task_ids="condition_group.Split_update_v", key="return_value")
-        
         df = result["df_update_V"]
         
         cursor, conn = ConOracle()
@@ -1355,34 +1421,240 @@ with DAG(
             if df is None or df.empty:
                 print("DataFrame is empty. Exiting task.")
                 return {"Update_v_sum": df}
-            else:           
-                update_status_query_V = """
-                        UPDATE XININSURE.SALE a
-                        SET a.SALESTATUS = 'V'
-                        WHERE a.SALEID = :SALEID
-                        AND a.SALESTATUS = 'O'
-                        AND a.PRBSTATUS = 'C'
-                        AND a.POLICYSTATUS = 'C'
-                    """
-                    
+            else:
+                i = 0
+                sql = """
+                    UPDATE XININSURE.SALE a
+                    SET {0}
+                    WHERE a.SALEID = :SALEID
+                    AND a.SALESTATUS = 'O'
+                    {1}
+                """
+                for index, row in df.iterrows():
+                    resultcode = row["RESULTCODE"]
+                    # เลือก field เฉพาะตาม RESULTCODE
+                    if resultcode == 'XALL':
+                        set_fields = "a.SALESTATUS = 'V', a.PRBCANCELDATE = SYSDATE"
+                        extra_cond = "AND a.PRBSTATUS = 'C' AND a.POLICYSTATUS = 'C'"
+                    elif resultcode == 'XPOL':
+                        set_fields = "a.SALESTATUS = 'V', a.PRBCANCELDATE = SYSDATE"
+                        extra_cond = "AND a.POLICYSTATUS = 'C' AND a.PRBSTATUS NOT IN ('A')"
+                    elif resultcode == 'XPRB':
+                        set_fields = "a.SALESTATUS = 'V', a.PRBCANCELDATE = SYSDATE"
+                        extra_cond = "AND a.PRBSTATUS = 'C' AND a.POLICYSTATUS NOT IN ('A')"
+                    else:
+                        print(f"Unknown RESULTCODE: {resultcode} for SALEID={row['SALEID']}, skipping update.")
+                        continue
+
+                    cursor.execute(sql.format(set_fields, extra_cond), {'SALEID': row['SALEID']})
+                    print(f"Number: {i+1} Updated Salestatus to V row {index}: SALEID={row['SALEID']} RESULTCODE={resultcode}")
+                    i += 1
+
+                update_status_query_N = """
+                    UPDATE XININSURE.SALEACTION a
+                    SET a.ACTIONSTATUS = 'Y'
+                    WHERE a.ACTIONID = :ACTIONID
+                    AND a.SALEID = :SALEID
+                    AND TRUNC(a.DUEDATE) = TRUNC(SYSDATE)
+                """
+                
                 i = 0
                 for index, row in df.iterrows():
-                    cursor.execute(update_status_query_V, {'SALEID': row['SALEID']})
-                    print(f"Number: {i+1} Updated Salestatus to N row {index}: SALEID={row['SALEID']}")
-                    i+=1
+                    cursor.execute(update_status_query_N, {'SALEID': row['SALEID'], 'ACTIONID': row['ACTIONID']})
+                    print(f"Number: {i+1} Updated actionstatus to Y row {index}: SALEID={row['SALEID']}, ACTIONID={row['ACTIONID']}")
+                    i += 1
                 
-                # conn.commit() 
+                #conn.commit()
                 print("All updates committed successfully.")
                 formatted_table = df.to_markdown(index=False)
                 print(f"\n{formatted_table}")
-                message = f"จำนวนรายการที่ปรับสถานะรวม {df} รายการ"
+                message = f"จำนวนรายการที่ปรับสถานะรวม {len(df)} รายการ"
                 print(message)
                 return {"Update_v_sum": df}
         except Exception as e:
             message = f'เกิดข้อผิดพลาด : {e}'
-            # message = f"Fail with task {task_id} \n error : {error}"
             send_flex_notification_start(message)
             pass
+        finally:
+            cursor.close()
+            conn.close()
+        
+    @task(trigger_rule="none_failed_min_one_success")
+    def Check_salestatus():
+        cursor, conn = ConOracle()
+        try:
+            query = f"""
+                        WITH SSA AS (
+                                            SELECT
+                                                SA.SALEID,
+                                                SA.INSTALLMENT,
+                                                A.ACTIONID,
+                                                A.ACTIONCODE,
+                                                SA.ACTIONSTATUS,
+                                                SA.RESULTID,
+                                                SA.DUEDATE,
+                                                SA.ACTIONREMARK,
+                                                SA.REQUESTREMARK,
+                                                SA.SEQUENCE 
+                                            FROM
+                                                XININSURE.SALEACTION SA
+                                                JOIN XININSURE.ACTION A ON SA.ACTIONID = A.ACTIONID 
+                                            WHERE
+                                                SA.ACTIONID IN (
+                                                    2261,
+                                                    3740,
+                                                    3741,
+                                                    3742,
+                                                    3743,
+                                                    3760,
+                                                    3761,
+                                                    5933,
+                                                    7533,
+                                                    9133,
+                                                    9174,
+                                                    11293,
+                                                    11574,
+                                                    11575,
+                                                    11576,
+                                                    11577,
+                                                    11553,
+                                                    11554,
+                                                    11555,
+                                                    15014 
+                                                ) 
+                                                AND SA.ACTIONSTATUS IN ( 'R', 'W', 'Y' ) 
+                                    AND SA.DUEDATE BETWEEN TO_DATE ( '23/09/2025', 'DD/MM/YYYY' ) 
+                                    AND TO_DATE ( '23/09/2025', 'DD/MM/YYYY' ) 
+                                ),
+                                PAID AS (
+                                SELECT
+                                    T.SALEID,
+                                    SUM ( I.RECEIVEAMOUNT ) AS PAIDCURRENTDATE 
+                                FROM
+                                    XININSURE.RECEIVEITEMCLEAR T
+                                    JOIN XININSURE.RECEIVEITEM I ON T.RECEIVEID = I.RECEIVEID 
+                                    AND T.RECEIVEITEM = I.RECEIVEITEM
+                                    JOIN XININSURE.RECEIVE R ON I.RECEIVEID = R.RECEIVEID
+                                WHERE
+                                    R.RECEIVESTATUS IN ( 'S', 'C' ) 
+                                    AND I.RECEIVEDATE BETWEEN TO_DATE ( '23/09/2025', 'DD/MM/YYYY' ) 
+                                    AND TO_DATE ( '23/09/2025', 'DD/MM/YYYY' )
+                                GROUP BY
+                                    T.SALEID
+                                ),
+                                STOCK_RET AS ( SELECT ST.SALEID, MIN ( ST.RETURNDATE ) AS RETURNDATE FROM XININSURE.STOCK ST GROUP BY ST.SALEID ) SELECT
+                                S.SALEID,
+                                XININSURE.GETBOOKNAME ( S.PERIODID, S.SALEBOOKCODE, S.SEQUENCE ) AS BOOKNAME,
+                                S.SALEBOOKCODE,
+                                S.ROUTEID,
+                                B.REGION,
+                                R.ROUTECODE,
+                                S.PAIDAMOUNT,
+                                S.CANCELRESULTID,
+                                ST.RETURNDATE,
+                                SSA.ACTIONREMARK,
+                                SSA.REQUESTREMARK,
+                                SB.BYTECODE AS PAYMENTSTATUS,
+                                S.PAYMENTMODE,
+                                F.STAFFCODE,
+                                F.STAFFTYPE,
+                                F.STAFFCODE || ':' || F.STAFFNAME AS STAFFNAME,
+                                D.DEPARTMENTID,
+                                D.DEPARTMENTCODE || ':' || D.DEPARTMENTNAME AS DEPARTMENTNAME,
+                                D.DEPARTMENTCODE,
+                                D.DEPARTMENTGROUP,
+                                SSA.ACTIONID,
+                                SSA.ACTIONCODE,
+                                SSA.ACTIONSTATUS,
+                                SSA.SEQUENCE,
+                                R.PROVINCECODE,
+                                SSA.RESULTID,
+                                RS.RESULTCODE,
+                                S.MASTERSALEID,
+                                SSA.DUEDATE,
+                                P.PAIDCURRENTDATE,
+                                PT.PRODUCTGROUP,
+                                PT.PRODUCTTYPE, 
+                                S.PRBSTATUS,
+                                S.POLICYSTATUS,
+                                S.SALESTATUS
+                            FROM
+                                XININSURE.sale S
+                                JOIN SSA ON S.SALEID = SSA.SALEID
+                                JOIN XININSURE.STAFF F ON S.STAFFID = F.STAFFID
+                                JOIN XININSURE.DEPARTMENT D ON S.STAFFDEPARTMENTID = D.DEPARTMENTID
+                                JOIN XININSURE.PRODUCT P ON S.PRODUCTID = P.PRODUCTID
+                                JOIN XININSURE.PRODUCTTYPE PT ON P.PRODUCTTYPE = PT.PRODUCTTYPE
+                                JOIN XININSURE.SUPPLIER SU ON P.SUPPLIERID = SU.SUPPLIERID
+                                JOIN XININSURE.ROUTE R ON S.ROUTEID = R.ROUTEID
+                                JOIN XININSURE.BRANCH B ON R.BRANCHID = B.BRANCHID
+                                LEFT JOIN STOCK_RET ST ON S.SALEID = ST.SALEID
+                                LEFT JOIN PAID P ON SSA.SALEID = P.SALEID
+                                LEFT JOIN XININSURE.SYSBYTEDES SB ON SB.COLUMNNAME = 'PAYMENTSTATUS' 
+                                AND SB.TABLENAME = 'SALE' 
+                                AND SB.BYTECODE = S.PAYMENTSTATUS
+                                LEFT JOIN XININSURE.RESULT RS ON RS.RESULTID = SSA.RESULTID 
+                            WHERE
+                                S.PLATEID IS NOT NULL 
+                                AND S.CANCELDATE IS NULL 
+                                AND S.CANCELEFFECTIVEDATE IS NULL
+                                AND (S.POLICYSTATUS = 'A' OR S.PRBSTATUS = 'A')
+                                AND S.SALESTATUS IN ('O','V')
+                            ORDER BY
+                                S.SALEID DESC
+ """
+            
+            print("Fetching data...")
+            cursor.execute(query)
+            df = pd.DataFrame(
+                cursor.fetchall(), columns=[desc[0] for desc in cursor.description]
+            )
+
+            print("======== start df original ============")
+            print("row count:", len(df))
+            print(df.head().to_markdown(index=False))
+            print("======== end df original ============")
+            
+            # df_digital_room = df.query("DEPARTMENTGROUP in ('DM')")
+            
+            df_notin_digital_room = df.query("DEPARTMENTGROUP not in ('DM')")
+            
+            df_O = df_notin_digital_room.query("SALESTATUS == 'O'") if df_notin_digital_room is not None and not df_notin_digital_room.empty else pd.DataFrame()
+            
+            df_V = df_notin_digital_room.query("SALESTATUS == 'V'") if df_notin_digital_room is not None and not df_notin_digital_room.empty else pd.DataFrame()
+            
+            # df_esy02 = df.query("ACTIONCODE in ('ESY02') and ACTIONSTATUS in ('Y')")
+            
+            formatted_table = df_notin_digital_room.to_markdown(index=False)
+            # print(query)
+            print(f"\n{formatted_table}")
+            print(f"Get data successfully")
+            print(f"df: {len(df_notin_digital_room)}")
+            
+            df_concat = pd.concat([df_V, df_O], ignore_index=True) if not (df_V.empty and df_O.empty) else pd.DataFrame()
+
+            formatted_df_concat = df_concat.to_markdown(index=False)
+            
+            print(f"\n{formatted_df_concat}")
+            
+            if not df_V.empty:
+                action_status = "X"
+                request_remark = "Auto Cancel MT หน้าระบบดำเนินการยกเลิกแล้ว"
+                print("============ df_invalid_actions start ============")
+                print(df_V.head().to_markdown(index=False))
+                Set_action_code(action_status, request_remark, df_V)
+            
+            return { 'df_V': df_V, 'df_O': df_O }
+        
+        except oracledb.Error as e:
+            print(f"Get_Data : {e}")
+            message = f'เกิดข้อผิดพลาดในการเรียกงาน Smart cancel MT : {e}'
+            # message = f"Fail with task {task_id} \n error : {error}"
+            send_flex_notification_start(message)
+            
+        finally:
+            cursor.close()
+            conn.close()          
 
     #Dummy
     start = EmptyOperator(task_id="start_dag", trigger_rule="none_failed_min_one_success")
@@ -1401,6 +1673,7 @@ with DAG(
     
     #task ที่ไป call function
     check_holiday_task = check_holiday()
+    
     
     @task_group(group_id="get_cancellation_group")
     def get_cancellation_group():
@@ -1430,8 +1703,9 @@ with DAG(
         check_time_result_task = Check_time_result_cancel()
         before_3pm_task = result_cancel_before_3pm()
         after_3pm_task = result_cancel_after_3pm()
+        Check_salestatus_task = Check_salestatus()
         
-        condition_c_task >> condition_b_task >> Split_has_remark_task >> Split_update_v_task >> update_salestatus_V_task >> check_time_result_task >> [before_3pm_task, after_3pm_task]
+        condition_c_task >> condition_b_task >> Split_has_remark_task >> Split_update_v_task >> update_salestatus_V_task >> check_time_result_task >> [before_3pm_task, after_3pm_task] >> Check_salestatus_task
         
     #กำหนด workflow
     (
