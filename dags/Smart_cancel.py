@@ -728,10 +728,10 @@ with DAG(
                             RS.RESULTID = SSA.RESULTID
                         WHERE
                             S.PLATEID IS NOT NULL
-                            AND S.CANCELDATE IS NULL
-                            AND S.CANCELEFFECTIVEDATE IS NULL
-                            AND (S.POLICYSTATUS NOT IN 'A'
-                             OR S.PRBSTATUS NOT IN 'A')
+                            --AND S.CANCELDATE IS NULL
+                            --AND S.CANCELEFFECTIVEDATE IS NULL
+                            --AND (S.POLICYSTATUS NOT IN 'A'
+                             --OR S.PRBSTATUS NOT IN 'A')
                             AND S.SALESTATUS = 'O'
                         ORDER BY
                             S.SALEID DESC
@@ -904,9 +904,15 @@ with DAG(
             if not df_result_is_esy.empty and "RESULTCODE" in df_result_is_esy.columns:
                 df_filter_esy_noresultcode = df_result_is_esy.query("RESULTCODE not in ('XPOL', 'XALL', 'XPRB')")
                 df_filter_esy_resultcode = df_result_is_esy.query("RESULTCODE in ('XPOL', 'XALL', 'XPRB')")
+                
+                df_filter_esy_noresultcode_mismatch_actioncode = df_filter_esy_noresultcode.query("ACTIONCODE not in @invalid_action_codes")
+                df_filter_esy_noresultcode_match_actioncode = df_filter_esy_noresultcode.query("ACTIONCODE in @invalid_action_codes")
             else:
                 df_filter_esy_noresultcode = pd.DataFrame()
                 df_filter_esy_resultcode = pd.DataFrame()
+                
+                df_filter_esy_noresultcode_mismatch_actioncode = pd.DataFrame()
+                df_filter_esy_noresultcode_match_actioncode = pd.DataFrame()
 
             if not df_result_not_esy.empty and "RESULTCODE" in df_result_not_esy.columns:
                 df_filter_notesy_noresultcode = df_result_not_esy.query("RESULTCODE not in ('XPOL', 'XALL', 'XPRB')")
@@ -918,7 +924,9 @@ with DAG(
             else:
                 df_filter_notesy_noresultcode = pd.DataFrame()
                 df_filter_notesy_resultcode = pd.DataFrame()
-                df_filter_mismatch_actioncodes = pd.DataFrame()
+                
+                df_filter_notesy_noresultcode_mismatch_actioncode = pd.DataFrame()
+                df_filter_notesy_noresultcode_match_actioncode = pd.DataFrame()
 
             formatted_table = df.to_markdown(index=False)
             print(f"\n{formatted_table}")
@@ -935,15 +943,17 @@ with DAG(
             df_concat_resultcode_combine = pd.concat([df_filter_esy_noresultcode, df_filter_esy_resultcode], ignore_index=True) if not (df_filter_esy_noresultcode.empty and df_filter_esy_resultcode.empty) else pd.DataFrame()
             
             # df_concat_not_esy_resultcode_combine = pd.concat([df_filter_notesy_resultcode, df_filter_mismatch_actioncodes], ignore_index=True) if not (df_filter_notesy_resultcode.empty and df_filter_mismatch_actioncodes.empty) else pd.DataFrame()
-
-            request_remark = "Auto Cancel MT สินเชื่อ ESY อนุมัติแล้วไม่สามารถยกเลิกได้ รบกวนตรวจสอบค่ะ"
-            action_status = "X"
-
-            conn.commit()
+            
+            if df_filter_esy_noresultcode_match_actioncode is not None and not df_filter_esy_noresultcode_match_actioncode.empty:
+                request_remark = "Auto Cancel MT สินเชื่อ ESY อนุมัติแล้วไม่สามารถยกเลิกได้ รบกวนตรวจสอบค่ะ"
+                action_status = "X"
+                Set_action_code(action_status, request_remark, df_filter_esy_noresultcode_match_actioncode)
+            elif df_filter_esy_noresultcode_mismatch_actioncode is not None and not df_filter_esy_noresultcode_mismatch_actioncode.empty:
+                request_remark = "Auto Cancel MT สินเชื่อ ESY อนุมัติแล้ว ไม่สามารถยกเลิกได้ รบกวนตรวจสอบครับ"
+                action_status = "W"
+                Set_action_code(action_status, request_remark, df_filter_esy_noresultcode_mismatch_actioncode)
 
             return {
-                'action_status': action_status,
-                'request_remark': request_remark,
                 'df_filter_esy_noresultcode': df_filter_esy_noresultcode,
                 'df_filter_esy_resultcode': df_filter_esy_resultcode,
                 'df_concat_resultcode_combine': df_concat_resultcode_combine,
@@ -952,7 +962,9 @@ with DAG(
                 # 'df_filter_mismatch_actioncodes': df_filter_mismatch_actioncodes,
                 'df_concat_not_esy_resultcode_combine': df_filter_notesy_resultcode,
                 'df_filter_notesy_resultcode_match_actioncode': df_filter_notesy_noresultcode_match_actioncode,
-                'df_filter_notesy_resultcode_mismatch_actioncode': df_filter_notesy_noresultcode_mismatch_actioncode
+                'df_filter_notesy_resultcode_mismatch_actioncode': df_filter_notesy_noresultcode_mismatch_actioncode,
+                'df_filter_esy_noresultcode_mismatch_actioncode': df_filter_esy_noresultcode_mismatch_actioncode,
+                'df_filter_esy_noresultcode_match_actioncode': df_filter_esy_noresultcode_match_actioncode
             }
 
         except oracledb.Error as error:
@@ -1137,6 +1149,9 @@ with DAG(
             df_XALL_Y = df_paymentstatus_Y.query("RESULTCODE == 'XALL'") if df_paymentstatus_Y is not None and not df_paymentstatus_Y.empty else pd.DataFrame()
             df_XPOL_Y = df_paymentstatus_Y.query("RESULTCODE == 'XPOL'") if df_paymentstatus_Y is not None and not df_paymentstatus_Y.empty else pd.DataFrame()
             
+            df_XALL_N = df_paymentstatus_not_Y.query("RESULTCODE == 'XALL'") if df_paymentstatus_not_Y is not None and not df_paymentstatus_not_Y.empty else pd.DataFrame()
+            df_XPOL_N = df_paymentstatus_not_Y.query("RESULTCODE == 'XPOL'") if df_paymentstatus_not_Y is not None and not df_paymentstatus_not_Y.empty else pd.DataFrame()
+            
             # resultcode เป็น XPRB และ ไม่มียอดรับชำระ
             df_XPRB_W = df_no_paid.query("RESULTCODE == 'XPRB'") if df_no_paid is not None and not df_no_paid.empty else pd.DataFrame()
             
@@ -1154,6 +1169,8 @@ with DAG(
             
             # เตรียมนำไปกรองข้อมูลเฉพาะ return date
             df_concat_resultcode = pd.concat([df_XALL_Y, df_XPOL_Y, df_XPRB_no_policynumber], ignore_index=True) if not (df_XALL_Y.empty and df_XPOL_Y.empty and df_XPRB_no_policynumber.empty) else pd.DataFrame()
+            
+            df_concat_resultcode_returndate = pd.concat([df_XALL_N, df_XPOL_N, df_XPRB_no_policynumber], ignore_index=True) if not (df_XALL_Y.empty and df_XPOL_Y.empty and df_XPRB_no_policynumber.empty) else pd.DataFrame()
             
             df_full_paid_XALL = df_paymentstatus_Y.query("RESULTCODE == 'XALL'") if df_paymentstatus_Y is not None and not df_paymentstatus_Y.empty else pd.DataFrame()
             df_full_paid_XPOL = df_paymentstatus_Y.query("RESULTCODE == 'XPOL'") if df_paymentstatus_Y is not None and not df_paymentstatus_Y.empty else pd.DataFrame()
@@ -1202,7 +1219,8 @@ with DAG(
                 "df_XPRB_has_policynumber": df_XPRB_has_policynumber,
                 "df_XPRB_no_policynumber": df_XPRB_no_policynumber,
                 "df_concat_resultcode_has_paid": df_concat_resultcode_has_paid,
-                "df_concat_full_paid": df_concat_full_paid
+                "df_concat_full_paid": df_concat_full_paid,
+                "df_concat_resultcode_returndate": df_concat_resultcode_returndate
             }
         
         except Exception as e:
@@ -1299,7 +1317,17 @@ with DAG(
         
         # ดึงข้อมูลจาก task Split_segment_condition
         result = ti.xcom_pull(task_ids="get_cancellation_group.Split_segment_condition", key="return_value")
-        df = result.get("df_concat_resultcode_has_returndate", pd.DataFrame())
+        df_has_returndate = result.get("df_concat_resultcode_has_returndate", pd.DataFrame())
+        
+        result = ti.xcom_pull(task_ids="get_cancellation_group.Select_esy02_X", key="return_value")
+        df_esy_resultcode = result.get("df_filter_esy_resultcode", pd.DataFrame())
+        
+        result = ti.xcom_pull(task_ids="get_cancellation_group.Split_segment_condition", key="return_value")
+        df_concat_resultcode_returndate = result.get("df_concat_resultcode_returndate", pd.DataFrame())
+        
+        df = pd.concat([df_has_returndate, df_esy_resultcode, df_concat_resultcode_returndate], ignore_index=True) if not (df_has_returndate.empty and df_esy_resultcode.empty and df_concat_resultcode_returndate.empty) else pd.DataFrame()
+        
+        # df_filter_esy_resultcode
         
         formatted_table = df.to_markdown(index=False)
         
@@ -1508,13 +1536,13 @@ with DAG(
                     resultcode = row["RESULTCODE"]
                     # เลือก field เฉพาะตาม RESULTCODE
                     if resultcode == 'XALL':
-                        set_fields = "a.SALESTATUS = 'V'"
+                        set_fields = "a.SALESTATUS = 'V',  a.saleid=a.saleid ,a.PERIODID = a.PERIODID"
                         extra_cond = "AND a.PRBSTATUS = 'C' AND a.POLICYSTATUS = 'C'"
                     elif resultcode == 'XPOL':
-                        set_fields = "a.SALESTATUS = 'V'"
+                        set_fields = "a.SALESTATUS = 'V',  a.saleid=a.saleid ,a.PERIODID = a.PERIODID"
                         extra_cond = "AND a.POLICYSTATUS = 'C' AND (a.PRBSTATUS NOT IN ('A') OR a.PRBSTATUS IS NULL)"
                     elif resultcode == 'XPRB':
-                        set_fields = "a.SALESTATUS = 'V'"
+                        set_fields = "a.SALESTATUS = 'V',  a.saleid=a.saleid ,a.PERIODID = a.PERIODID"
                         extra_cond = "AND a.PRBSTATUS = 'C' AND (a.POLICYSTATUS NOT IN ('A') OR a.POLICYSTATUS IS NULL)"
                     else:
                         print(f"Unknown RESULTCODE: {resultcode} for SALEID={row['SALEID']}, skipping update.")
@@ -1524,19 +1552,19 @@ with DAG(
                     print(f"Number: {i+1} Updated Salestatus to V row {index}: SALEID={row['SALEID']} RESULTCODE={resultcode}")
                     i += 1
 
-                update_status_query_N = """
-                    UPDATE XININSURE.SALEACTION a
-                    SET a.ACTIONSTATUS = 'Y'
-                    WHERE a.ACTIONID = :ACTIONID
-                    AND a.SALEID = :SALEID
-                    AND TRUNC(a.DUEDATE) = TRUNC(SYSDATE)
-                """
+                # update_status_query_N = """
+                #     UPDATE XININSURE.SALEACTION a
+                #     SET a.ACTIONSTATUS = 'Y'
+                #     WHERE a.ACTIONID = :ACTIONID
+                #     AND a.SALEID = :SALEID
+                #     AND TRUNC(a.DUEDATE) = TRUNC(SYSDATE)
+                # """
                 
-                i = 0
-                for index, row in df.iterrows():
-                    cursor.execute(update_status_query_N, {'SALEID': row['SALEID'], 'ACTIONID': row['ACTIONID']})
-                    print(f"Number: {i+1} Updated actionstatus to Y row {index}: SALEID={row['SALEID']}, ACTIONID={row['ACTIONID']}")
-                    i += 1
+                # i = 0
+                # for index, row in df.iterrows():
+                #     cursor.execute(update_status_query_N, {'SALEID': row['SALEID'], 'ACTIONID': row['ACTIONID']})
+                #     print(f"Number: {i+1} Updated actionstatus to Y row {index}: SALEID={row['SALEID']}, ACTIONID={row['ACTIONID']}")
+                #     i += 1
                 
                 conn.commit()
                 print("All updates committed successfully.")
@@ -1670,8 +1698,8 @@ with DAG(
                                 LEFT JOIN XININSURE.RESULT RS ON RS.RESULTID = SSA.RESULTID 
                             WHERE
                                 S.PLATEID IS NOT NULL 
-                                AND S.CANCELDATE IS NULL 
-                                AND S.CANCELEFFECTIVEDATE IS NULL
+                                --AND S.CANCELDATE IS NULL
+                                --AND S.CANCELEFFECTIVEDATE IS NULL
                                 --AND (S.POLICYSTATUS = 'A' OR S.PRBSTATUS = 'A')
                                 AND S.SALESTATUS IN ('O','V')
                             ORDER BY
