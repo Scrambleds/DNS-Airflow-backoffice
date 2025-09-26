@@ -246,14 +246,17 @@ def Check_action_code(row, df_actionData):
 
         actionCode = row["ACTIONCODE"]
         staffCode = row["STAFFCODE"]
+        routeGroup = row["ROUTEGROUP"]
         code = ""
 
         if actionCode == "CMTEL":
             code = check_CMTEL(staffCode, cmtel_config)
         elif actionCode == "CMT21":
             code = check_CMT21(staffCode, cmt21_config)
-        elif actionCode in ["CMT34","CMT34.01","CMT35", "CMT35.01"]:
+        elif actionCode in ["CMT34","CMT34.01","CMT35", "CMT35.01"] and routeGroup in ["BKK"]: 
             code = 'ZDL01'
+        elif actionCode in ["CMT34","CMT34.01","CMT35", "CMT35.01"] and routeGroup in ["R010"]:
+            code = 'CMT105.5'
         elif actionCode in ["CMT32", "CMT32.01", "CMT33"]:
             region = row["REGION"]
             if region in ['N']:
@@ -667,6 +670,7 @@ with DAG(
                             S.ROUTEID,
                             B.REGION,
                             R.ROUTECODE,
+                            R.ROUTEGROUP,
                             S.PAIDAMOUNT,
                             S.CANCELRESULTID,
                             ST.RETURNDATE_S,
@@ -1537,13 +1541,16 @@ with DAG(
                     # เลือก field เฉพาะตาม RESULTCODE
                     if resultcode == 'XALL':
                         set_fields = "a.SALESTATUS = 'V',  a.saleid=a.saleid ,a.PERIODID = a.PERIODID"
-                        extra_cond = "AND a.PRBSTATUS = 'C' AND a.POLICYSTATUS = 'C'"
+                        # extra_cond = "AND a.PRBSTATUS = 'C' AND a.POLICYSTATUS = 'C'"
+                        extra_cond = "AND 1=1"
                     elif resultcode == 'XPOL':
                         set_fields = "a.SALESTATUS = 'V',  a.saleid=a.saleid ,a.PERIODID = a.PERIODID"
-                        extra_cond = "AND a.POLICYSTATUS = 'C' AND (a.PRBSTATUS NOT IN ('A') OR a.PRBSTATUS IS NULL)"
+                        # extra_cond = "AND a.POLICYSTATUS = 'C' AND (a.PRBSTATUS NOT IN ('A') OR a.PRBSTATUS IS NULL)"
+                        extra_cond = "AND 1=1"
                     elif resultcode == 'XPRB':
                         set_fields = "a.SALESTATUS = 'V',  a.saleid=a.saleid ,a.PERIODID = a.PERIODID"
-                        extra_cond = "AND a.PRBSTATUS = 'C' AND (a.POLICYSTATUS NOT IN ('A') OR a.POLICYSTATUS IS NULL)"
+                        # extra_cond = "AND a.PRBSTATUS = 'C' AND (a.POLICYSTATUS NOT IN ('A') OR a.POLICYSTATUS IS NULL)"
+                        extra_cond = "AND 1=1"
                     else:
                         print(f"Unknown RESULTCODE: {resultcode} for SALEID={row['SALEID']}, skipping update.")
                         continue
@@ -1651,6 +1658,7 @@ with DAG(
                                 S.ROUTEID,
                                 B.REGION,
                                 R.ROUTECODE,
+                                R.ROUTEGROUP,
                                 S.PAIDAMOUNT,
                                 S.CANCELRESULTID,
                                 ST.RETURNDATE,
