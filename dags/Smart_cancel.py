@@ -261,11 +261,11 @@ def Check_action_code(row, df_actionData):
             region = row["REGION"]
             if region in ['N']:
                 code = 'ZBR01'
-            elif region in ['BKK', 'MX', 'MU', 'ML']:
+            elif region in ['S']: 
                 code = 'ZBR02'
             elif region in ['NL', 'NU']:
                 code = 'ZBR03'
-            elif region in ['S']:
+            elif region in ['BKK', 'MX', 'MU', 'ML']:
                 code = 'ZBR04'
         elif actionCode in ['CMT07.2', 'CMT01', 'CMT02']:
             code = actionCode
