@@ -621,8 +621,8 @@ with DAG(
                                             15014 
                                         )
                             AND SA.ACTIONSTATUS IN ( 'R', 'W', 'Y' )
-                            AND SA.DUEDATE BETWEEN TO_DATE ( '24/09/2025', 'DD/MM/YYYY' ) 
-                            AND TO_DATE ( '24/09/2025', 'DD/MM/YYYY' ) 
+                            AND SA.DUEDATE BETWEEN TO_DATE ( '29/09/2025', 'DD/MM/YYYY' ) 
+                            AND TO_DATE ( '29/09/2025', 'DD/MM/YYYY' ) 
                         ),
                             PAID AS (
                             SELECT
@@ -637,8 +637,8 @@ with DAG(
                                 I.RECEIVEID = R.RECEIVEID
                             WHERE
                                 R.RECEIVESTATUS IN ( 'S', 'C' )
-                                    AND I.RECEIVEDATE BETWEEN TO_DATE ( '24/09/2025', 'DD/MM/YYYY' ) 
-                                AND TO_DATE ( '24/09/2025', 'DD/MM/YYYY' )
+                                    AND I.RECEIVEDATE BETWEEN TO_DATE ( '29/09/2025', 'DD/MM/YYYY' ) 
+                                AND TO_DATE ( '29/09/2025', 'DD/MM/YYYY' )
                                 GROUP BY T.SALEID
                         ),
                         --	STOCK_RET AS (
@@ -1632,8 +1632,8 @@ with DAG(
                                                     15014 
                                                 ) 
                                                 AND SA.ACTIONSTATUS IN ( 'R', 'W', 'Y' ) 
-                                    AND SA.DUEDATE BETWEEN TO_DATE ( '24/09/2025', 'DD/MM/YYYY' ) 
-                                    AND TO_DATE ( '24/09/2025', 'DD/MM/YYYY' ) 
+                                    AND SA.DUEDATE BETWEEN TO_DATE ( '29/09/2025', 'DD/MM/YYYY' ) 
+                                    AND TO_DATE ( '29/09/2025', 'DD/MM/YYYY' ) 
                                 ),
                                 PAID AS (
                                 SELECT
@@ -1646,8 +1646,8 @@ with DAG(
                                     JOIN XININSURE.RECEIVE R ON I.RECEIVEID = R.RECEIVEID
                                 WHERE
                                     R.RECEIVESTATUS IN ( 'S', 'C' ) 
-                                    AND I.RECEIVEDATE BETWEEN TO_DATE ( '24/09/2025', 'DD/MM/YYYY' ) 
-                                    AND TO_DATE ( '24/09/2025', 'DD/MM/YYYY' )
+                                    AND I.RECEIVEDATE BETWEEN TO_DATE ( '29/09/2025', 'DD/MM/YYYY' ) 
+                                    AND TO_DATE ( '29/09/2025', 'DD/MM/YYYY' )
                                 GROUP BY
                                     T.SALEID
                                 ),
