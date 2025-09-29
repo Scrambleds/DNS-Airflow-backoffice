@@ -255,7 +255,7 @@ def Check_action_code(row, df_actionData):
             code = check_CMT21(staffCode, cmt21_config)
         elif actionCode in ["CMT34","CMT34.01","CMT35", "CMT35.01"] and routeGroup in ["BKK"]: 
             code = 'ZDL01'
-        elif actionCode in ["CMT34","CMT34.01","CMT35", "CMT35.01"] and routeGroup in ["R010"]:
+        elif actionCode in ["CMT34","CMT34.01","CMT35", "CMT35.01"] and str(routeGroup).startswith("R01"):
             code = 'CMT105.5'
         elif actionCode in ["CMT32", "CMT32.01", "CMT33"]:
             region = row["REGION"]
