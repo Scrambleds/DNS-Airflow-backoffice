@@ -134,7 +134,7 @@ def send_flex_notification_start(message=None):
 
 def ConOracle():
     try:
-        env = os.getenv('ENV', 'xininsure_preprod_demo')
+        env = os.getenv('ENV', 'xininsure_preprod')
         db_host = config.get(env, 'host_xininsure')
         db_port = config.get(env, 'port_xininsure')
         db_username = config.get(env, 'username_xininsure')
@@ -149,7 +149,7 @@ def ConOracle():
         return cursor, conn
     except oracledb.Error as error:
         message = f"เกิดข้อผิดพลาดในการเชื่อมต่อกับ Oracle DB : {error}"
-        # send_flex_notification_start(message)
+        # ##send_flex_notification_start(message)
         print("เกิดข้อผิดพลาดในการเชื่อมต่อกับ Oracle DB:", error)
         return message, None
 
@@ -272,6 +272,7 @@ def Check_action_code(row, df_actionData):
         elif actionCode in invalid_action_codes:
             code = 'CMT105.1'
         
+        
         print("action code :",actionCode, "change to : ",code)
         if code:
             result = df_actionData.query("ACTIONCODE == @code")["ACTIONID"]
@@ -313,9 +314,7 @@ def check_cancel_CMT21(row):
     except Exception as e:
         print(f"Error checking CMT21: {e}")
         raise
-
-            
-    
+        
 def Get_request_cancel_by(row):
     try:
         actionCode = row["ACTIONCODE"]
@@ -531,7 +530,120 @@ def Set_action_code(action_status = "X", request_remark = "Auto Cancel MT สิ
     finally:
         cursor.close()
         conn.close()
-    
+
+#Modual 5 start
+def Set_saleaction_code(df = pd.DataFrame()):
+    cursor, conn = ConOracle()
+    if df is None or df.empty:
+        print("Failed to get data.")
+        cursor.close()
+        conn.close()
+        return None
+    try:
+        for index, row in df.iterrows():
+            print("Fetching data...")
+            type_cancel = row["RESULTCODE"]
+            saleid = row["SALEID"]
+            cursor.callproc("XININSURE.GENOVERCREDITCMTCLOSE",[saleid,2])
+        formatted_table = df.to_markdown(index=False)
+        GenCMT(df)
+        
+        print(f"\n{formatted_table}")
+        print(f"Get data successfully")
+        print(f"df: {len(df)}")
+     
+    except oracledb.Error as e:
+        print(f"error : {e}")
+    finally:
+        cursor.close()
+        conn.close()
+
+def GenCMT(df):
+    cursor, conn = ConOracle()
+    try:
+        for index,row in df.iterrows():
+            producttype = row["PRODUCTTYPE"]
+            salebookcode = row["SALEBOOKCODE"]
+            GenCMT = "NONE"
+            if producttype == "MT":
+                if salebookcode == "TJN":
+                    GenCMT = "GENCMT44"
+                    Procedure_code = f"XININSURE.{GenCMT}"
+                    cursor.callproc(Procedure_code, [row["SALEID"]])
+            elif producttype == "MISC":
+                GenCMT = "GENCMT19"
+                Procedure_code = f"XININSURE.{GenCMT}"
+                cursor.callproc(Procedure_code, [row["SALEID"]])
+            print(f"Insert {index}: SALEID={row['SALEID']}, GENCMT={GenCMT}")
+    except oracledb.Error as e:
+        print(f"error : {e}")
+    finally:
+        cursor.close()
+        conn.close()
+
+def get_refunddate():
+    try:
+        df_holidays = Get_Holidays()
+        if df_holidays is None or df_holidays.empty:
+            print("No holiday data found.")
+            return None
+
+        # แปลงคอลัมน์ HOLIDAYDATE เป็น datetime
+        holiday_dates = pd.to_datetime(df_holidays["HOLIDAYDATE"]).dt.date
+        i = 0
+        # ใช้ currentDateAndTime ที่เป็น datetime อยู่แล้ว
+        refund_date = currentDateAndTime.date()
+        while refund_date in holiday_dates.values:
+            i += 1
+            refund_date = (currentDateAndTime + timedelta(days=i)).date()
+
+        print(f"Refunddate : {refund_date}")
+        return refund_date
+
+    except Exception as e:
+        message = f"error : {e}"
+        print(message)
+
+def Update_stock(df = pd.DataFrame()):
+    cursor, conn = ConOracle()
+    if df is None or df.empty:
+        print("Failed to get data.")
+        cursor.close()
+        conn.close()
+        return None
+    sql = """
+            UPDATE 
+                    xininsure.stock X
+            Set
+                    X.RETURNDATE = TRUNC(SYSDATE),
+                    X.REFUNDDATE = TRUNC(:REFUNDDATE)
+            WHERE
+                    X.SALEID = :SALEID 
+          """
+    try:
+        refund_date = get_refunddate()
+        if refund_date is None:
+            print("No valid refund date found.")
+            return None
+        for index, row in df.iterrows():
+            print("Fetching data...")
+            if row["PRODUCTTYPE"] == "MISC":
+                cursor.execute(sql, {
+                    "SALEID": row["SALEID"],
+                    "REFUNDDATE": refund_date
+                })
+                print(f"Update {index}: SALEID={row['SALEID']}, REFUNDDATE={refund_date}")
+            else:
+                print(f"Skip Update for SALEID={row['SALEID']} with PRODUCTTYPE={row['PRODUCTTYPE']}")
+        conn.commit()
+    except oracledb.Error as e:
+        conn.rollback()
+        print(f"Error updating stock: {e}")
+    finally:
+        cursor.close()
+        conn.close()
+#Modual 5 Endd
+
 # Default arguments
 default_args = {
     "owner": "DCP",
@@ -549,7 +661,7 @@ with DAG(
     tags=["DCP"],
     start_date=datetime(2024, 4, 24, 16, 30, 0, 0, tzinfo=local_tz),
     # start_date=start_date,  # ใช้ start_date ที่คำนวณแล้ว
-    schedule_interval="*/50 8-20 * * *",
+    # schedule_interval="*/50 8-20 * * *",
     # schedule_interval="*/10 8-20 * * *"
 ) as dag:
     
@@ -581,164 +693,127 @@ with DAG(
         cursor, conn = ConOracle()
         try:
             query = f"""
-                        WITH SSA AS (
-                                                SELECT
-                            SA.SALEID,
-                            SA.INSTALLMENT,
-                            A.ACTIONID,
-                            A.ACTIONCODE,
-                            SA.ACTIONSTATUS,
-                            SA.RESULTID,
-                            SA.DUEDATE,
-                            SA.ACTIONREMARK,
-                            SA.REQUESTREMARK,
-                            SA.SEQUENCE
-                        FROM
-                            XININSURE.SALEACTION SA
-                        JOIN XININSURE.ACTION A ON
-                            SA.ACTIONID = A.ACTIONID
-                        WHERE
-                            SA.ACTIONID IN (
-                                            2261,
-                                            3740,
-                                            3741,
-                                            3742,
-                                            3743,
-                                            3760,
-                                            3761,
-                                            5933,
-                                            7533,
-                                            9133,
-                                            9174,
-                                            11293,
-                                            11574,
-                                            11575,
-                                            11576,
-                                            11577,
-                                            11553,
-                                            11554,
-                                            11555,
-                                            15014 
-                                        )
-                            AND SA.ACTIONSTATUS IN ( 'R', 'W', 'Y' )
-                            AND SA.DUEDATE BETWEEN TO_DATE ( '29/09/2025', 'DD/MM/YYYY' ) 
-                            AND TO_DATE ( '29/09/2025', 'DD/MM/YYYY' ) 
-                        ),
-                            PAID AS (
-                            SELECT
-                                T.SALEID,
-                                SUM (I.RECEIVEAMOUNT) AS PAIDCURRENTDATE
+                             WITH SSA AS (
+                                            SELECT
+                                                SA.SALEID,
+                                                SA.INSTALLMENT,
+                                                A.ACTIONID,
+                                                A.ACTIONCODE,
+                                                SA.ACTIONSTATUS,
+                                                SA.RESULTID,
+                                                SA.DUEDATE,
+                                                SA.ACTIONREMARK,
+                                                SA.REQUESTREMARK,
+                                                SA.SEQUENCE 
+                                            FROM
+                                                XININSURE.SALEACTION SA
+                                                JOIN XININSURE.ACTION A ON SA.ACTIONID = A.ACTIONID 
+                                            WHERE
+                                                SA.ACTIONID IN (
+                                                    2261,
+                                                    3740,
+                                                    3741,
+                                                    3742,
+                                                    3743,
+                                                    3760,
+                                                    3761,
+                                                    5933,
+                                                    7533,
+                                                    9133,
+                                                    9174,
+                                                    11293,
+                                                    11574,
+                                                    11575,
+                                                    11576,
+                                                    11577,
+                                                    11553,
+                                                    11554,
+                                                    11555,
+                                                    15014 
+                                                ) 
+                                                AND SA.ACTIONSTATUS IN ( 'R', 'W', 'Y' ) 
+                                    AND SA.DUEDATE >= trunc(TO_DATE ( '06/10/2025', 'DD/MM/YYYY' ) )
+                                    AND SA.DUEDATE < trunc(TO_DATE ( '06/10/2025', 'DD/MM/YYYY' ) ) +1
+                                ),
+                                PAID AS (
+                                SELECT
+                                    T.SALEID,
+                                    SUM ( I.RECEIVEAMOUNT ) AS PAIDCURRENTDATE 
+                                FROM
+                                    XININSURE.RECEIVEITEMCLEAR T
+                                    JOIN XININSURE.RECEIVEITEM I ON T.RECEIVEID = I.RECEIVEID 
+                                    AND T.RECEIVEITEM = I.RECEIVEITEM
+                                    JOIN XININSURE.RECEIVE R ON I.RECEIVEID = R.RECEIVEID
+                                WHERE
+                                    R.RECEIVESTATUS IN ( 'S', 'C' ) 
+                                    AND I.RECEIVEDATE >= trunc(TO_DATE ( '06/10/2025', 'DD/MM/YYYY' ) )
+                                    AND I.RECEIVEDATE < trunc(TO_DATE ( '06/10/2025', 'DD/MM/YYYY' ) ) +1
+                                GROUP BY
+                                    T.SALEID
+                                ),
+                                STOCK_RET AS ( SELECT ST.SALEID, MIN ( ST.RETURNDATE ) AS RETURNDATE FROM XININSURE.STOCK ST GROUP BY ST.SALEID ) SELECT
+                                S.SALEID,
+                                S.PRBPOLICYNUMBER,
+                                XININSURE.GETBOOKNAME ( S.PERIODID, S.SALEBOOKCODE, S.SEQUENCE ) AS BOOKNAME,
+                                S.SALEBOOKCODE,
+                                S.ROUTEID,
+                                B.REGION,
+                                R.ROUTECODE,
+                                R.ROUTEGROUP,
+                                S.PAIDAMOUNT,
+                                S.CANCELRESULTID,
+                                ST.RETURNDATE,
+                                SSA.ACTIONREMARK,
+                                SSA.REQUESTREMARK,
+                                SB.BYTECODE AS PAYMENTSTATUS,
+                                S.PAYMENTMODE,
+                                F.STAFFCODE,
+                                F.STAFFTYPE,
+                                F.STAFFCODE || ':' || F.STAFFNAME AS STAFFNAME,
+                                D.DEPARTMENTID,
+                                D.DEPARTMENTCODE || ':' || D.DEPARTMENTNAME AS DEPARTMENTNAME,
+                                D.DEPARTMENTCODE,
+                                D.DEPARTMENTGROUP,
+                                SSA.ACTIONID,
+                                SSA.ACTIONCODE,
+                                SSA.ACTIONSTATUS,
+                                SSA.SEQUENCE,
+                                R.PROVINCECODE,
+                                SSA.RESULTID,
+                                RS.RESULTCODE,
+                                S.MASTERSALEID,
+                                SSA.DUEDATE,
+                                P.PAIDCURRENTDATE,
+                                PT.PRODUCTGROUP,
+                                PT.PRODUCTTYPE, 
+                                S.PRBSTATUS,
+                                S.POLICYSTATUS,
+                                S.SALESTATUS
                             FROM
-                                XININSURE.RECEIVEITEMCLEAR T
-                            JOIN XININSURE.RECEIVEITEM I ON
-                                T.RECEIVEID = I.RECEIVEID
-                                AND T.RECEIVEITEM = I.RECEIVEITEM
-                            JOIN XININSURE.RECEIVE R ON
-                                I.RECEIVEID = R.RECEIVEID
+                                XININSURE.sale S
+                                JOIN SSA ON S.SALEID = SSA.SALEID
+                                JOIN XININSURE.STAFF F ON S.STAFFID = F.STAFFID
+                                JOIN XININSURE.DEPARTMENT D ON S.STAFFDEPARTMENTID = D.DEPARTMENTID
+                                JOIN XININSURE.PRODUCT P ON S.PRODUCTID = P.PRODUCTID
+                                JOIN XININSURE.PRODUCTTYPE PT ON P.PRODUCTTYPE = PT.PRODUCTTYPE
+                                JOIN XININSURE.SUPPLIER SU ON P.SUPPLIERID = SU.SUPPLIERID
+                                JOIN XININSURE.ROUTE R ON S.ROUTEID = R.ROUTEID
+                                JOIN XININSURE.BRANCH B ON R.BRANCHID = B.BRANCHID
+                                LEFT JOIN STOCK_RET ST ON S.SALEID = ST.SALEID
+                                LEFT JOIN PAID P ON SSA.SALEID = P.SALEID
+                                LEFT JOIN XININSURE.SYSBYTEDES SB ON SB.COLUMNNAME = 'PAYMENTSTATUS' 
+                                AND SB.TABLENAME = 'SALE' 
+                                AND SB.BYTECODE = S.PAYMENTSTATUS
+                                LEFT JOIN XININSURE.RESULT RS ON RS.RESULTID = SSA.RESULTID 
                             WHERE
-                                R.RECEIVESTATUS IN ( 'S', 'C' )
-                                    AND I.RECEIVEDATE BETWEEN TO_DATE ( '29/09/2025', 'DD/MM/YYYY' ) 
-                                AND TO_DATE ( '29/09/2025', 'DD/MM/YYYY' )
-                                GROUP BY T.SALEID
-                        ),
-                        --	STOCK_RET AS (
-                        --	SELECT
-                        --		ST.SALEID,
-                        --		MIN (ST.RETURNDATE) AS RETURNDATE
-                        --	FROM
-                        --		XININSURE.STOCK ST
-                        --	GROUP BY
-                        --		ST.SALEID )
-                        STOCK_RET AS (
-                            SELECT
-                                SALEID,
-                                MAX(RETURNDATE) AS RETURNDATE_S,
-                                MAX(CASE WHEN STOCKTYPE = 'P' THEN RETURNDATE END) AS RETURNDATE_P
-                            FROM
-                                XININSURE.STOCK ST
-                            WHERE
-                                STOCKTYPE IN ('S', 'P')
-                            GROUP BY
-                                SALEID
-                        )
-                        SELECT
-                            S.SALEID,
-                            XININSURE.GETBOOKNAME ( S.PERIODID,
-                            S.SALEBOOKCODE,
-                            S.SEQUENCE ) AS BOOKNAME,
-                            S.SALEBOOKCODE,
-                            S.ROUTEID,
-                            B.REGION,
-                            R.ROUTECODE,
-                            R.ROUTEGROUP,
-                            S.PAIDAMOUNT,
-                            S.CANCELRESULTID,
-                            ST.RETURNDATE_S,
-                            ST.RETURNDATE_P,
-                            SSA.ACTIONREMARK,
-                            SSA.REQUESTREMARK,
-                            SB.BYTECODE AS PAYMENTSTATUS,
-                            S.PAYMENTMODE,
-                            F.STAFFCODE,
-                            F.STAFFTYPE,
-                            F.STAFFCODE || ':' || F.STAFFNAME AS STAFFNAME,
-                            D.DEPARTMENTID,
-                            D.DEPARTMENTCODE || ':' || D.DEPARTMENTNAME AS DEPARTMENTNAME,
-                            D.DEPARTMENTCODE,
-                            D.DEPARTMENTGROUP,
-                            SSA.ACTIONID,
-                            SSA.ACTIONCODE,
-                            SSA.ACTIONSTATUS,
-                            SSA.SEQUENCE,
-                            R.PROVINCECODE,
-                            SSA.RESULTID,
-                            RS.RESULTCODE,
-                            S.MASTERSALEID,
-                            SSA.DUEDATE,
-                            P.PAIDCURRENTDATE,
-                            PT.PRODUCTGROUP,
-                            PT.PRODUCTTYPE,
-                            S.PRBSTATUS,
-                            S.POLICYSTATUS,
-                            S.SALESTATUS,
-                            S.PRBPOLICYNUMBER
-                        FROM
-                            XININSURE.sale S
-                        JOIN SSA ON
-                            S.SALEID = SSA.SALEID
-                        JOIN XININSURE.STAFF F ON
-                            S.STAFFID = F.STAFFID
-                        JOIN XININSURE.DEPARTMENT D ON
-                            S.STAFFDEPARTMENTID = D.DEPARTMENTID
-                        JOIN XININSURE.PRODUCT P ON
-                            S.PRODUCTID = P.PRODUCTID
-                        JOIN XININSURE.PRODUCTTYPE PT ON
-                            P.PRODUCTTYPE = PT.PRODUCTTYPE
-                        JOIN XININSURE.SUPPLIER SU ON
-                            P.SUPPLIERID = SU.SUPPLIERID
-                        JOIN XININSURE.ROUTE R ON
-                            S.ROUTEID = R.ROUTEID
-                        JOIN XININSURE.BRANCH B ON
-                            R.BRANCHID = B.BRANCHID
-                        LEFT JOIN STOCK_RET ST ON
-                            S.SALEID = ST.SALEID
-                        LEFT JOIN PAID P ON
-                            SSA.SALEID = P.SALEID
-                        LEFT JOIN XININSURE.SYSBYTEDES SB ON
-                            SB.COLUMNNAME = 'PAYMENTSTATUS'
-                            AND SB.TABLENAME = 'SALE'
-                            AND SB.BYTECODE = S.PAYMENTSTATUS
-                        LEFT JOIN XININSURE.RESULT RS ON
-                            RS.RESULTID = SSA.RESULTID
-                        WHERE
-                            S.PLATEID IS NOT NULL
-                            --AND S.CANCELDATE IS NULL
-                            --AND S.CANCELEFFECTIVEDATE IS NULL
-                            --AND (S.POLICYSTATUS NOT IN 'A'
-                             --OR S.PRBSTATUS NOT IN 'A')
-                            AND S.SALESTATUS = 'O'
-                        ORDER BY
-                            S.SALEID DESC
+                                S.PLATEID IS NOT NULL 
+                                --AND S.CANCELDATE IS NULL
+                                --AND S.CANCELEFFECTIVEDATE IS NULL
+                                --AND (S.POLICYSTATUS = 'A' OR S.PRBSTATUS = 'A')
+                                AND S.SALESTATUS IN ('O','V')
+                            ORDER BY
+                                S.SALEID DESC
+                                
  """
             
             print("Fetching data...")
@@ -770,7 +845,7 @@ with DAG(
             print(f"Get_Data : {e}")
             message = f'เกิดข้อผิดพลาดในการเรียกงาน Smart cancel MT : {e}'
             # message = f"Fail with task {task_id} \n error : {error}"
-            send_flex_notification_start(message)
+            ###send_flex_notification_start(message)
             
         finally:
             cursor.close()
@@ -835,7 +910,7 @@ with DAG(
             print(f"OracleDB Error: {error}")
             message = f'เกิดข้อผิดพลาด : {error}'
             # message = f"Fail with task {task_id} \n error : {error}"
-            send_flex_notification_start(message)
+            ##send_flex_notification_start(message)
             conn.rollback()
             return None
 
@@ -976,7 +1051,7 @@ with DAG(
             print(f"OracleDB Error: {error}")
             message = f'เกิดข้อผิดพลาด : {error}'
             # message = f"Fail with task {task_id} \n error : {error}"
-            send_flex_notification_start(message)
+            ##send_flex_notification_start(message)
             return pd.DataFrame()
         finally:
             cursor.close()
@@ -1081,8 +1156,9 @@ with DAG(
         
         except Exception as e:
             message = f'เกิดข้อผิดพลาด : {e}'
+            print(f"Error : {e}")
             # message = f"Fail with task {task_id} \n error : {error}"
-            send_flex_notification_start(message)
+            ##send_flex_notification_start(message)
             pass
         
     @task
@@ -1118,7 +1194,7 @@ with DAG(
         except Exception as e:
             message = f'เกิดข้อผิดพลาด : {e}'
             # message = f"Fail with task {task_id} \n error : {error}"
-            send_flex_notification_start(message)
+            ##send_flex_notification_start(message)
             pass
         
     @task
@@ -1215,7 +1291,7 @@ with DAG(
             df_concat_resultcode_no_returndate = pd.concat([df_XALL_invalid, df_XPOL_invalid, df_XPRB_invalid], ignore_index=True) if not (df_XALL_invalid.empty and df_XPOL_invalid.empty and df_XPRB_invalid.empty) else pd.DataFrame()
             
             # กรองข้อมูลที่ไม่มีค่า return date
-            # df_concat_resultcode_no_returndate = df_concat_has_returndate[~mask] if not df_concat_has_returndate.empty else pd.DataFrame()
+            #df_concat_resultcode_no_returndate = df_concat_has_returndate[~mask] if not df_concat_has_returndate.empty else pd.DataFrame()
 
             return {
                 "df_concat_resultcode_has_returndate": df_concat_resultcode_has_returndate,
@@ -1229,8 +1305,8 @@ with DAG(
         
         except Exception as e:
             message = f'เกิดข้อผิดพลาด : {e}'
-            print(f"[Split_segment_condition] Exception: {e}")
-            send_flex_notification_start(message)
+            logging.error(f"[Split_segment_condition] Exception: {e}")
+            ##send_flex_notification_start(message)
             pass
         
     @task
@@ -1269,7 +1345,7 @@ with DAG(
         except Exception as e:
             message = f'เกิดข้อผิดพลาด : {e}'
             # message = f"Fail with task {task_id} \n error : {error}"
-            send_flex_notification_start(message)
+            ##send_flex_notification_start(message)
             pass
             
     @task
@@ -1308,7 +1384,7 @@ with DAG(
         except Exception as e:
             message = f'เกิดข้อผิดพลาด : {e}'
             # message = f"Fail with task {task_id} \n error : {error}"
-            send_flex_notification_start(message)
+            ##send_flex_notification_start(message)
             pass
         
     @task
@@ -1454,7 +1530,7 @@ with DAG(
             print(f"Exception in result_cancel_before_3pm: {e}")
             message = f'เกิดข้อผิดพลาด : {e}'
             # message = f"Fail with task {task_id} \n error : {error}"
-            send_flex_notification_start(message)
+            ##send_flex_notification_start(message)
         return "condition_group.Check_salestatus"
     
     @task
@@ -1476,7 +1552,7 @@ with DAG(
             print(f"Exception in result_cancel_after_3pm: {e}")
             message = f'เกิดข้อผิดพลาด : {e}'
             # message = f"Fail with task {task_id} \n error : {error}"
-            send_flex_notification_start(message)
+            ##send_flex_notification_start(message)
         return "condition_group.Check_salestatus"
     
     @task
@@ -1506,7 +1582,7 @@ with DAG(
         except Exception as e:
             message = f'เกิดข้อผิดพลาด : {e}'
             # message = f"Fail with task {task_id} \n error : {error}"
-            send_flex_notification_start(message)
+            ##send_flex_notification_start(message)
             pass
     
     @task
@@ -1516,7 +1592,7 @@ with DAG(
         try_number = kwargs['task_instance'].try_number
         message = f"Processing task {task_id} ,try_number {try_number}"
         # print(f"{message}")
-        # send_flex_notification_start(message)
+        # ##send_flex_notification_start(message)
         
         result = ti.xcom_pull(task_ids="condition_group.Split_update_v", key="return_value")
         df = result["df_update_V"]
@@ -1593,7 +1669,7 @@ with DAG(
         cursor, conn = ConOracle()
         try:
             query = f"""
-                        WITH SSA AS (
+                               WITH SSA AS (
                                             SELECT
                                                 SA.SALEID,
                                                 SA.INSTALLMENT,
@@ -1632,8 +1708,8 @@ with DAG(
                                                     15014 
                                                 ) 
                                                 AND SA.ACTIONSTATUS IN ( 'R', 'W', 'Y' ) 
-                                    AND SA.DUEDATE BETWEEN TO_DATE ( '29/09/2025', 'DD/MM/YYYY' ) 
-                                    AND TO_DATE ( '29/09/2025', 'DD/MM/YYYY' ) 
+                                    AND SA.DUEDATE >= trunc(TO_DATE ( '06/10/2025', 'DD/MM/YYYY' ) )
+                                    AND SA.DUEDATE < trunc(TO_DATE ( '06/10/2025', 'DD/MM/YYYY' ) ) +1
                                 ),
                                 PAID AS (
                                 SELECT
@@ -1646,8 +1722,8 @@ with DAG(
                                     JOIN XININSURE.RECEIVE R ON I.RECEIVEID = R.RECEIVEID
                                 WHERE
                                     R.RECEIVESTATUS IN ( 'S', 'C' ) 
-                                    AND I.RECEIVEDATE BETWEEN TO_DATE ( '29/09/2025', 'DD/MM/YYYY' ) 
-                                    AND TO_DATE ( '29/09/2025', 'DD/MM/YYYY' )
+                                    AND I.RECEIVEDATE >= trunc(TO_DATE ( '06/10/2025', 'DD/MM/YYYY' ) )
+                                    AND I.RECEIVEDATE < trunc(TO_DATE ( '06/10/2025', 'DD/MM/YYYY' ) ) +1
                                 GROUP BY
                                     T.SALEID
                                 ),
@@ -1712,6 +1788,8 @@ with DAG(
                                 AND S.SALESTATUS IN ('O','V')
                             ORDER BY
                                 S.SALEID DESC
+                                
+                                
  """
             
             print("Fetching data...")
@@ -1754,17 +1832,46 @@ with DAG(
                 print(df_V.head().to_markdown(index=False))
                 Set_action_code(action_status, request_remark, df_V)
             
-            return { 'df_V': df_V, 'df_O': df_O }
-        
+            #return { 'df_V': df_V, 'df_O': df_O }
+            return {'df':df_notin_digital_room}        
         except oracledb.Error as e:
             print(f"Get_Data : {e}")
             message = f'เกิดข้อผิดพลาดในการเรียกงาน Smart cancel MT : {e}'
             # message = f"Fail with task {task_id} \n error : {error}"
-            send_flex_notification_start(message)
+            ##send_flex_notification_start(message)
             
         finally:
             cursor.close()
             conn.close()          
+
+    @task
+    def Check_cancel_finish(**kwargs):
+        cursor,conn = ConOracle()
+        ti = kwargs["ti"]
+        task_id = kwargs['task_instance'].task_id
+        try_number = kwargs['task_instance'].try_number
+        message = f"Processing task {task_id} ,try_number {try_number}"
+       
+        result = ti.xcom_pull(task_ids="condition_group.Check_salestatus",key="return_value")
+        #df_V = result["df_V"]
+        #df_O = result["df_O"]
+        #formatted_table_V = df_V.to_markdown(index=False)
+        #formatted_table_O = df_O.to_markdown(index=False)
+
+        df = result["df"]
+        df_formatted_table = df.to_markdown(index=False)
+        try:
+            print(f"\n{df_formatted_table}")
+            Set_saleaction_code(df)
+            Update_stock(df)
+            
+        except Exception  as orerr:
+            print(f"Error : {orerr}")
+            message = f'เกิดข้อผิดพลาด: {orerr}'
+           
+        finally:
+            cursor.close()
+            conn.close()
 
     #Dummy
     start = EmptyOperator(task_id="start_dag", trigger_rule="none_failed_min_one_success")
@@ -1814,15 +1921,17 @@ with DAG(
         before_3pm_task = result_cancel_before_3pm()
         after_3pm_task = result_cancel_after_3pm()
         Check_salestatus_task = Check_salestatus()
+        Check_cancel_finish_task = Check_cancel_finish()
         
-        condition_c_task >> condition_b_task >> Split_has_remark_task >> Split_update_v_task >> update_salestatus_V_task >> check_time_result_task >> [before_3pm_task, after_3pm_task] >> Check_salestatus_task
+        
+        condition_c_task >> condition_b_task >> Split_has_remark_task >> Split_update_v_task >> update_salestatus_V_task >> check_time_result_task >> [before_3pm_task, after_3pm_task] >> Check_salestatus_task >> Check_cancel_finish_task
         
     #กำหนด workflow
     (
         #เริ่มต้น
         start >> check_holiday_task >> [holiday_path, work_path],
+
         holiday_path >> end,
-        
         #ระงับยกเลิกไป join x , ยกเลิกไป join v
         work_path >> get_cancellation_group()
         >> [join_x, join_v, join_w],
