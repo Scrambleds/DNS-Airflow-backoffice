@@ -508,13 +508,18 @@ def Set_action_code(action_status = "X", request_remark = "Auto Cancel MT สิ
             print("Fetching data...")
             ResActionCode = Check_action_code(row, df_actionData) ## df.row
             if ResActionCode is not None:
-                cursor.execute(sql, {
-                    "saleid": row["SALEID"],
-                    "actionid": int(ResActionCode),
-                    "actionstatus" : action_status,
-                    "request_remark" : request_remark
-                })
-                print(f"Insert {index}: SALEID={row['SALEID']}, ACTIONID={ResActionCode}")
+                stop_double_insert_result = stop_double_insert(row["SALEID"], int(ResActionCode))
+                if stop_double_insert_result == 0:
+                    cursor.execute(sql, {
+                        "saleid": row["SALEID"],
+                        "actionid": int(ResActionCode),
+                        "actionstatus" : action_status,
+                        "request_remark" : request_remark
+                     })
+                    print(f"เมียไอวัตเป็นผีInsert {index}: SALEID={row['SALEID']}, ACTIONID={ResActionCode}")
+                else:
+                    print(f"หยุดการ insert ซ้ำ SALEID={row['SALEID']}, ACTIONID={ResActionCode}")
+            
 
         formatted_table = df.to_markdown(index=False)
         # print(query)
@@ -530,7 +535,30 @@ def Set_action_code(action_status = "X", request_remark = "Auto Cancel MT สิ
     finally:
         cursor.close()
         conn.close()
-
+#หยุดการ insert ซ้ำ กรณี NOEZY  Con_B
+def stop_double_insert(saleid , actionid):
+    cursor, conn = ConOracle()
+    count = 0
+    sql = """
+        select count(*) from xininsure.saleaction
+        where saleid = :saleid
+        and actionid =  :actionid
+        AND ACTIONdate >= trunc(sysdate)
+        AND ACTIONdate < trunc(sysdate ) +1
+"""
+    try:
+        cursor.execute(sql, {
+            "saleid": saleid,
+            "actionid": actionid
+        })
+        (tmpnum2,) = cursor.fetchone()
+        return tmpnum2
+    except Exception as e:
+        conn.rollback()
+        print(f"Exception : {e}")
+    finally:
+        cursor.close()
+        conn.close()
 #Modual 5 start
 def Set_saleaction_code(df = pd.DataFrame()):
     cursor, conn = ConOracle()
@@ -545,6 +573,7 @@ def Set_saleaction_code(df = pd.DataFrame()):
             type_cancel = row["RESULTCODE"]
             saleid = row["SALEID"]
             cursor.callproc("XININSURE.GENOVERCREDITCMTCLOSE",[saleid,2])
+            print(f"Insert {index}: SALEID={row['SALEID']}")
         formatted_table = df.to_markdown(index=False)
         GenCMT(df)
         
@@ -693,126 +722,165 @@ with DAG(
         cursor, conn = ConOracle()
         try:
             query = f"""
-                             WITH SSA AS (
-                                            SELECT
-                                                SA.SALEID,
-                                                SA.INSTALLMENT,
-                                                A.ACTIONID,
-                                                A.ACTIONCODE,
-                                                SA.ACTIONSTATUS,
-                                                SA.RESULTID,
-                                                SA.DUEDATE,
-                                                SA.ACTIONREMARK,
-                                                SA.REQUESTREMARK,
-                                                SA.SEQUENCE 
-                                            FROM
-                                                XININSURE.SALEACTION SA
-                                                JOIN XININSURE.ACTION A ON SA.ACTIONID = A.ACTIONID 
-                                            WHERE
-                                                SA.ACTIONID IN (
-                                                    2261,
-                                                    3740,
-                                                    3741,
-                                                    3742,
-                                                    3743,
-                                                    3760,
-                                                    3761,
-                                                    5933,
-                                                    7533,
-                                                    9133,
-                                                    9174,
-                                                    11293,
-                                                    11574,
-                                                    11575,
-                                                    11576,
-                                                    11577,
-                                                    11553,
-                                                    11554,
-                                                    11555,
-                                                    15014 
-                                                ) 
-                                                AND SA.ACTIONSTATUS IN ( 'R', 'W', 'Y' ) 
+                                 WITH SSA AS (
+                                                SELECT
+                            SA.SALEID,
+                            SA.INSTALLMENT,
+                            A.ACTIONID,
+                            A.ACTIONCODE,
+                            SA.ACTIONSTATUS,
+                            SA.RESULTID,
+                            SA.DUEDATE,
+                            SA.ACTIONREMARK,
+                            SA.REQUESTREMARK,
+                            SA.SEQUENCE
+                        FROM
+                            XININSURE.SALEACTION SA
+                        JOIN XININSURE.ACTION A ON
+                            SA.ACTIONID = A.ACTIONID
+                        WHERE
+                            SA.ACTIONID IN (
+                                            2261,
+                                            3740,
+                                            3741,
+                                            3742,
+                                            3743,
+                                            3760,
+                                            3761,
+                                            5933,
+                                            7533,
+                                            9133,
+                                            9174,
+                                            11293,
+                                            11574,
+                                            11575,
+                                            11576,
+                                            11577,
+                                            11553,
+                                            11554,
+                                            11555,
+                                            15014 
+                                        )
+                            AND SA.ACTIONSTATUS IN ( 'R', 'W', 'Y' )
                                     AND SA.DUEDATE >= trunc(TO_DATE ( '06/10/2025', 'DD/MM/YYYY' ) )
                                     AND SA.DUEDATE < trunc(TO_DATE ( '06/10/2025', 'DD/MM/YYYY' ) ) +1
-                                ),
-                                PAID AS (
-                                SELECT
-                                    T.SALEID,
-                                    SUM ( I.RECEIVEAMOUNT ) AS PAIDCURRENTDATE 
-                                FROM
-                                    XININSURE.RECEIVEITEMCLEAR T
-                                    JOIN XININSURE.RECEIVEITEM I ON T.RECEIVEID = I.RECEIVEID 
-                                    AND T.RECEIVEITEM = I.RECEIVEITEM
-                                    JOIN XININSURE.RECEIVE R ON I.RECEIVEID = R.RECEIVEID
-                                WHERE
-                                    R.RECEIVESTATUS IN ( 'S', 'C' ) 
+                                 ),
+                            PAID AS (
+                            SELECT
+                                T.SALEID,
+                                SUM (I.RECEIVEAMOUNT) AS PAIDCURRENTDATE
+                            FROM
+                                XININSURE.RECEIVEITEMCLEAR T
+                            JOIN XININSURE.RECEIVEITEM I ON
+                                T.RECEIVEID = I.RECEIVEID
+                                AND T.RECEIVEITEM = I.RECEIVEITEM
+                            JOIN XININSURE.RECEIVE R ON
+                                I.RECEIVEID = R.RECEIVEID
+                            WHERE
+                                R.RECEIVESTATUS IN ( 'S', 'C' )
                                     AND I.RECEIVEDATE >= trunc(TO_DATE ( '06/10/2025', 'DD/MM/YYYY' ) )
                                     AND I.RECEIVEDATE < trunc(TO_DATE ( '06/10/2025', 'DD/MM/YYYY' ) ) +1
-                                GROUP BY
-                                    T.SALEID
-                                ),
-                                STOCK_RET AS ( SELECT ST.SALEID, MIN ( ST.RETURNDATE ) AS RETURNDATE FROM XININSURE.STOCK ST GROUP BY ST.SALEID ) SELECT
-                                S.SALEID,
-                                S.PRBPOLICYNUMBER,
-                                XININSURE.GETBOOKNAME ( S.PERIODID, S.SALEBOOKCODE, S.SEQUENCE ) AS BOOKNAME,
-                                S.SALEBOOKCODE,
-                                S.ROUTEID,
-                                B.REGION,
-                                R.ROUTECODE,
-                                R.ROUTEGROUP,
-                                S.PAIDAMOUNT,
-                                S.CANCELRESULTID,
-                                ST.RETURNDATE,
-                                SSA.ACTIONREMARK,
-                                SSA.REQUESTREMARK,
-                                SB.BYTECODE AS PAYMENTSTATUS,
-                                S.PAYMENTMODE,
-                                F.STAFFCODE,
-                                F.STAFFTYPE,
-                                F.STAFFCODE || ':' || F.STAFFNAME AS STAFFNAME,
-                                D.DEPARTMENTID,
-                                D.DEPARTMENTCODE || ':' || D.DEPARTMENTNAME AS DEPARTMENTNAME,
-                                D.DEPARTMENTCODE,
-                                D.DEPARTMENTGROUP,
-                                SSA.ACTIONID,
-                                SSA.ACTIONCODE,
-                                SSA.ACTIONSTATUS,
-                                SSA.SEQUENCE,
-                                R.PROVINCECODE,
-                                SSA.RESULTID,
-                                RS.RESULTCODE,
-                                S.MASTERSALEID,
-                                SSA.DUEDATE,
-                                P.PAIDCURRENTDATE,
-                                PT.PRODUCTGROUP,
-                                PT.PRODUCTTYPE, 
-                                S.PRBSTATUS,
-                                S.POLICYSTATUS,
-                                S.SALESTATUS
+                               
+                                GROUP BY T.SALEID
+                        ),
+                        --	STOCK_RET AS (
+                        --	SELECT
+                        --		ST.SALEID,
+                        --		MIN (ST.RETURNDATE) AS RETURNDATE
+                        --	FROM
+                        --		XININSURE.STOCK ST
+                        --	GROUP BY
+                        --		ST.SALEID )
+                        STOCK_RET AS (
+                            SELECT
+                                SALEID,
+                                MAX(RETURNDATE) AS RETURNDATE_S,
+                                MAX(CASE WHEN STOCKTYPE = 'P' THEN RETURNDATE END) AS RETURNDATE_P
                             FROM
-                                XININSURE.sale S
-                                JOIN SSA ON S.SALEID = SSA.SALEID
-                                JOIN XININSURE.STAFF F ON S.STAFFID = F.STAFFID
-                                JOIN XININSURE.DEPARTMENT D ON S.STAFFDEPARTMENTID = D.DEPARTMENTID
-                                JOIN XININSURE.PRODUCT P ON S.PRODUCTID = P.PRODUCTID
-                                JOIN XININSURE.PRODUCTTYPE PT ON P.PRODUCTTYPE = PT.PRODUCTTYPE
-                                JOIN XININSURE.SUPPLIER SU ON P.SUPPLIERID = SU.SUPPLIERID
-                                JOIN XININSURE.ROUTE R ON S.ROUTEID = R.ROUTEID
-                                JOIN XININSURE.BRANCH B ON R.BRANCHID = B.BRANCHID
-                                LEFT JOIN STOCK_RET ST ON S.SALEID = ST.SALEID
-                                LEFT JOIN PAID P ON SSA.SALEID = P.SALEID
-                                LEFT JOIN XININSURE.SYSBYTEDES SB ON SB.COLUMNNAME = 'PAYMENTSTATUS' 
-                                AND SB.TABLENAME = 'SALE' 
-                                AND SB.BYTECODE = S.PAYMENTSTATUS
-                                LEFT JOIN XININSURE.RESULT RS ON RS.RESULTID = SSA.RESULTID 
+                                XININSURE.STOCK ST
                             WHERE
-                                S.PLATEID IS NOT NULL 
-                                --AND S.CANCELDATE IS NULL
-                                --AND S.CANCELEFFECTIVEDATE IS NULL
-                                --AND (S.POLICYSTATUS = 'A' OR S.PRBSTATUS = 'A')
-                                AND S.SALESTATUS IN ('O','V')
-                            ORDER BY
-                                S.SALEID DESC
+                                STOCKTYPE IN ('S', 'P')
+                            GROUP BY
+                                SALEID
+                        )
+                        SELECT
+                            S.SALEID,
+                            XININSURE.GETBOOKNAME ( S.PERIODID,
+                            S.SALEBOOKCODE,
+                            S.SEQUENCE ) AS BOOKNAME,
+                            S.SALEBOOKCODE,
+                            S.ROUTEID,
+                            B.REGION,
+                            R.ROUTECODE,
+                            R.ROUTEGROUP,
+                            S.PAIDAMOUNT,
+                            S.CANCELRESULTID,
+                            ST.RETURNDATE_S,
+                            ST.RETURNDATE_P,
+                            SSA.ACTIONREMARK,
+                            SSA.REQUESTREMARK,
+                            SB.BYTECODE AS PAYMENTSTATUS,
+                            S.PAYMENTMODE,
+                            F.STAFFCODE,
+                            F.STAFFTYPE,
+                            F.STAFFCODE || ':' || F.STAFFNAME AS STAFFNAME,
+                            D.DEPARTMENTID,
+                            D.DEPARTMENTCODE || ':' || D.DEPARTMENTNAME AS DEPARTMENTNAME,
+                            D.DEPARTMENTCODE,
+                            D.DEPARTMENTGROUP,
+                            SSA.ACTIONID,
+                            SSA.ACTIONCODE,
+                            SSA.ACTIONSTATUS,
+                            SSA.SEQUENCE,
+                            R.PROVINCECODE,
+                            SSA.RESULTID,
+                            RS.RESULTCODE,
+                            S.MASTERSALEID,
+                            SSA.DUEDATE,
+                            P.PAIDCURRENTDATE,
+                            PT.PRODUCTGROUP,
+                            PT.PRODUCTTYPE,
+                            S.PRBSTATUS,
+                            S.POLICYSTATUS,
+                            S.SALESTATUS,
+                            S.PRBPOLICYNUMBER
+                        FROM
+                            XININSURE.sale S
+                        JOIN SSA ON
+                            S.SALEID = SSA.SALEID
+                        JOIN XININSURE.STAFF F ON
+                            S.STAFFID = F.STAFFID
+                        JOIN XININSURE.DEPARTMENT D ON
+                            S.STAFFDEPARTMENTID = D.DEPARTMENTID
+                        JOIN XININSURE.PRODUCT P ON
+                            S.PRODUCTID = P.PRODUCTID
+                        JOIN XININSURE.PRODUCTTYPE PT ON
+                            P.PRODUCTTYPE = PT.PRODUCTTYPE
+                        JOIN XININSURE.SUPPLIER SU ON
+                            P.SUPPLIERID = SU.SUPPLIERID
+                        JOIN XININSURE.ROUTE R ON
+                            S.ROUTEID = R.ROUTEID
+                        JOIN XININSURE.BRANCH B ON
+                            R.BRANCHID = B.BRANCHID
+                        LEFT JOIN STOCK_RET ST ON
+                            S.SALEID = ST.SALEID
+                        LEFT JOIN PAID P ON
+                            SSA.SALEID = P.SALEID
+                        LEFT JOIN XININSURE.SYSBYTEDES SB ON
+                            SB.COLUMNNAME = 'PAYMENTSTATUS'
+                            AND SB.TABLENAME = 'SALE'
+                            AND SB.BYTECODE = S.PAYMENTSTATUS
+                        LEFT JOIN XININSURE.RESULT RS ON
+                            RS.RESULTID = SSA.RESULTID
+                        WHERE
+                            S.PLATEID IS NOT NULL
+                            --AND S.CANCELDATE IS NULL
+                            --AND S.CANCELEFFECTIVEDATE IS NULL
+                            --AND (S.POLICYSTATUS NOT IN 'A'
+                             --OR S.PRBSTATUS NOT IN 'A')
+                            AND S.SALESTATUS = 'O'
+                        ORDER BY
+                            S.SALEID DESC
                                 
  """
             
@@ -900,7 +968,7 @@ with DAG(
                             "actionstatus": action_status_update,
                             "request_remark": request_remark,
                         })
-                        print(f"Insert {i+1}: SALEID={row['SALEID']}, ACTIONID={action_code_insert}")
+                        print(f"Insert {i+1}: SALEID={row['SALEID']}, ACTIONID={action_code_insert},SEQUENCE = ")
                         i += 1
 
                 conn.commit() 
@@ -1346,6 +1414,7 @@ with DAG(
             message = f'เกิดข้อผิดพลาด : {e}'
             # message = f"Fail with task {task_id} \n error : {error}"
             ##send_flex_notification_start(message)
+            print(f"Error : {e}")
             pass
             
     @task
@@ -1581,6 +1650,7 @@ with DAG(
         
         except Exception as e:
             message = f'เกิดข้อผิดพลาด : {e}'
+            print(f"Error : {e}")
             # message = f"Fail with task {task_id} \n error : {error}"
             ##send_flex_notification_start(message)
             pass
