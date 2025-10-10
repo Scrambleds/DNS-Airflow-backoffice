@@ -500,8 +500,8 @@ def Set_action_code(action_status = "X", request_remark = "Auto Cancel MT สิ
             FROM XININSURE.SALE S
             WHERE S.SALEID = :saleid
         """
-    # action_status = "X"
-    # request_remark = "Auto Cancel MT สินเชื่อ ESY อนุมัติแล้วไม่สามารถยกเลิกได้ รบกวนตรวจสอบค่ะ"
+    #action_status = "X"
+    #request_remark = "Auto Cancel MT สินเชื่อ ESY อนุมัติแล้วไม่สามารถยกเลิกได้ รบกวนตรวจสอบค่ะ"
     try:
 
         for index, row in df.iterrows():
@@ -694,7 +694,7 @@ with DAG(
     # schedule_interval="*/10 8-20 * * *"
 ) as dag:
     
-    @task.branch
+    @task.branch #เช็ควันหยุด
     def check_holiday(**kwargs):
         ti = kwargs["ti"]
         task_id = kwargs['task_instance'].task_id
@@ -717,7 +717,7 @@ with DAG(
         finally:
             print(f"{message}")
     
-    @task
+    @task # ดึงข้อมูลงานที่ต้องยกเลิก
     def Get_cancelled_work():
         cursor, conn = ConOracle()
         try:
@@ -895,8 +895,9 @@ with DAG(
             print(df.head().to_markdown(index=False))
             print("======== end df original ============")
             
+            # งานห้อง DM 
             df_digital_room = df.query("DEPARTMENTGROUP in ('DM')")
-            
+            # งานห้องอื่นๆ ที่ไม่ใช่ DM
             df_notin_digital_room = df.query("DEPARTMENTGROUP not in ('DM')")
             
             # df_esy02 = df.query("ACTIONCODE in ('ESY02') and ACTIONSTATUS in ('Y')")
@@ -919,7 +920,7 @@ with DAG(
             cursor.close()
             conn.close()          
                 
-    @task
+    @task # Insert งานยกเลิก MT ห้องขาย DM 
     def Insert_digital_DM(**kwargs):
         ti = kwargs["ti"]
         result = ti.xcom_pull(task_ids="get_cancellation_group.Get_cancelled_work", key="return_value")
@@ -1048,19 +1049,26 @@ with DAG(
             print(df_result_is_esy.head().to_markdown(index=False))
             print("==== end df_result_is_esy ====")
 
+            # มี Esy
             if not df_result_is_esy.empty and "RESULTCODE" in df_result_is_esy.columns:
+                # ไม่มีรหัส / มี Esy 
                 df_filter_esy_noresultcode = df_result_is_esy.query("RESULTCODE not in ('XPOL', 'XALL', 'XPRB')")
+                # มีรหัส /มี Esy
                 df_filter_esy_resultcode = df_result_is_esy.query("RESULTCODE in ('XPOL', 'XALL', 'XPRB')")
-                
+                # ไม่มีรหัส /มี Esy / Actioncode ไม่ตรง
                 df_filter_esy_noresultcode_mismatch_actioncode = df_filter_esy_noresultcode.query("ACTIONCODE not in @invalid_action_codes")
+                # ไม่มีรหัส /มี Esy / Actioncodeตรง
                 df_filter_esy_noresultcode_match_actioncode = df_filter_esy_noresultcode.query("ACTIONCODE in @invalid_action_codes")
             else:
+                # ไม่มีรหัส / มี Esy
                 df_filter_esy_noresultcode = pd.DataFrame()
+                # มีรหัส /มี Esy
                 df_filter_esy_resultcode = pd.DataFrame()
-                
+                # ไม่มีรหัส /มี Esy / Actioncode ไม่ตรง
                 df_filter_esy_noresultcode_mismatch_actioncode = pd.DataFrame()
+                # ไม่มีรหัส /มี Esy / Actioncode ตรง
                 df_filter_esy_noresultcode_match_actioncode = pd.DataFrame()
-
+            # ไม่มี Esy
             if not df_result_not_esy.empty and "RESULTCODE" in df_result_not_esy.columns:
                 df_filter_notesy_noresultcode = df_result_not_esy.query("RESULTCODE not in ('XPOL', 'XALL', 'XPRB')")
                 # df_filter_mismatch_actioncodes = df_result_not_esy.query("ACTIONCODE in @invalid_action_codes")
